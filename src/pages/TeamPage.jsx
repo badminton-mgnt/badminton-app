@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Header, Card, Button, BottomNav, Modal, Input } from '../components'
-import { addTeamMember, deleteTeam, getAppUsers, getTeam, getTeamMembers, getUserProfile, leaveTeam, updateTeam } from '../lib/api'
+import { Header, Card, Button, BottomNav, Modal, Input, Badge } from '../components'
+import { addTeamMember, deleteTeam, getAppUsers, getTeam, getTeamMembers, getUserProfile, leaveTeam, updateTeam, updateTeamTreasurer } from '../lib/api'
 import { motion } from 'framer-motion'
 import { Edit2, UserPlus, Users } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
@@ -25,6 +25,7 @@ export const TeamPage = () => {
   const [savingTeam, setSavingTeam] = useState(false)
   const [deletingTeam, setDeletingTeam] = useState(false)
   const [leavingTeam, setLeavingTeam] = useState(false)
+  const [assigningTreasurerId, setAssigningTreasurerId] = useState(null)
 
   useEffect(() => {
     loadData()
@@ -47,6 +48,24 @@ export const TeamPage = () => {
       console.error('Error loading team data:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const canManageTreasurer = ['admin', 'sub_admin'].includes(currentUserRole)
+  const hasTreasurer = Boolean(team?.treasurer_id)
+  const treasurerMember = members.find((member) => String(member.user_id) === String(team?.treasurer_id))
+
+  const handleAssignTreasurer = async (memberUserId) => {
+    if (!canManageTreasurer || !team?.id) return
+
+    try {
+      setAssigningTreasurerId(memberUserId === null ? 'UNSET' : memberUserId)
+      await updateTeamTreasurer(team.id, memberUserId)
+      await loadData()
+    } catch (error) {
+      console.error('Error assigning team treasurer:', error)
+    } finally {
+      setAssigningTreasurerId(null)
     }
   }
 
@@ -180,6 +199,26 @@ export const TeamPage = () => {
             </Card>
           )}
 
+          {canManageTreasurer && hasTreasurer && (
+            <Card className="mb-6">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm text-neutral-600">Current Treasurer</p>
+                  <p className="font-semibold">{treasurerMember?.users?.name || 'Assigned member'}</p>
+                </div>
+                <Button
+                  variant="secondary"
+                  className="!px-3 !py-1.5 text-xs"
+                  onClick={() => handleAssignTreasurer(null)}
+                  loading={assigningTreasurerId === 'UNSET'}
+                  disabled={assigningTreasurerId !== null}
+                >
+                  Unset Treasurer
+                </Button>
+              </div>
+            </Card>
+          )}
+
           <h2 className="text-sm font-semibold text-neutral-600 mb-3 uppercase">
             Members
           </h2>
@@ -200,11 +239,27 @@ export const TeamPage = () => {
                       Joined {new Date(member.joined_at).toLocaleDateString()}
                     </p>
                   </div>
-                  {member.users?.role && member.users.role !== 'user' && (
-                    <span className="text-xs font-medium uppercase text-primary-400">
-                      {member.users.role}
-                    </span>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {String(team?.treasurer_id) === String(member.user_id) && (
+                      <Badge status="success">Treasurer</Badge>
+                    )}
+                    {member.users?.role && member.users.role !== 'user' && (
+                      <span className="text-xs font-medium uppercase text-primary-400">
+                        {member.users.role}
+                      </span>
+                    )}
+                    {canManageTreasurer && !hasTreasurer && String(team?.treasurer_id) !== String(member.user_id) && (
+                      <Button
+                        variant="secondary"
+                        className="!px-3 !py-1.5 text-xs"
+                        disabled={assigningTreasurerId === member.user_id}
+                        loading={assigningTreasurerId === member.user_id}
+                        onClick={() => handleAssignTreasurer(member.user_id)}
+                      >
+                        Set Treasurer
+                      </Button>
+                    )}
+                  </div>
                 </Card>
               </motion.div>
             ))}

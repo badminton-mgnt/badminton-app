@@ -4,8 +4,8 @@ import { Header, Button, Card, Badge, BottomNav, Modal } from '../components'
 import {
   checkinParticipant,
   getEventExpenses,
+  getEventPaymentTransfers,
   getEventParticipants,
-  getEventPayments,
   getEvents,
   joinTeam,
   logout,
@@ -147,6 +147,7 @@ export const HomePage = () => {
         todayMatch ||
         upcomingEvents[0] ||
         [...activeEvents].sort((a, b) => new Date(b.date) - new Date(a.date))[0]
+      const teamTreasurerId = currentTeam?.teams?.treasurer_id
 
       if (!paymentEvent) {
         setPaymentSummary({
@@ -158,22 +159,48 @@ export const HomePage = () => {
         return
       }
 
+      if (!teamTreasurerId) {
+        setPaymentSummary({
+          status: `Set a treasurer for ${currentTeam.teams.name} to enable settlements`,
+          amount: 0,
+          tone: 'default',
+          label: 'No Treasurer',
+        })
+        return
+      }
+
       try {
-        const [participantsData, expensesData, paymentsData] = await Promise.all([
+        const [participantsData, expensesData, transfersData] = await Promise.all([
           getEventParticipants(paymentEvent.id),
           getEventExpenses(paymentEvent.id),
-          getEventPayments(paymentEvent.id),
+          getEventPaymentTransfers(paymentEvent.id),
         ])
 
         const checkedInCount = participantsData.filter((participant) => participant.checked_in).length
         const approvedExpenses = expensesData.filter((expense) => expense.status === 'APPROVED')
         const totalExpense = approvedExpenses.reduce((sum, expense) => sum + parseFloat(expense.amount), 0)
         const share = checkedInCount > 0 ? totalExpense / checkedInCount : 0
-        const userPayment = paymentsData.find((payment) => payment.user_id === user.id)
+        const transferStatus = (status) => String(status || '').toUpperCase()
+        const transferDirection = (direction) => String(direction || '').toUpperCase().trim()
+        const isTransferConfirmed = (status) => ['CONFIRMED', 'COMPLETE', 'COMPLETED'].includes(transferStatus(status))
+        const isToTreasuryDirection = (direction) => transferDirection(direction) === 'TO_TREASURY'
+
+        const userPaymentTransfers = transfersData.filter(
+          (transfer) =>
+            String(transfer.from_user_id) === String(user.id) &&
+            String(transfer.to_user_id) === String(teamTreasurerId) &&
+            isToTreasuryDirection(transfer.direction) &&
+            isTransferConfirmed(transfer.status)
+        )
+
+        const settlementPaymentAmount = userPaymentTransfers.reduce(
+          (sum, transfer) => sum + Number(transfer.amount || 0),
+          0
+        )
+
         const userApprovedExpenseTotal = approvedExpenses
           .filter((expense) => String(expense.user_id) === String(user.id))
           .reduce((sum, expense) => sum + parseFloat(expense.amount), 0)
-        const settlementPaymentAmount = userPayment ? Number(userPayment.amount) : 0
         const cachedCheckedIn = hasCheckedInEvent(user.id, paymentEvent.id)
         const userIsCheckedIn = participantsData.some(
           (participant) => String(participant.user_id) === String(user.id) && isParticipantCheckedIn(participant)

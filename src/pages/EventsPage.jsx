@@ -4,7 +4,7 @@ import { Header, Card, Button, Badge, BottomNav, Modal, Input } from '../compone
 import { createEvent, deleteEvent, getEvents, getUserProfile, updateEvent } from '../lib/api'
 import { formatBangkokDateTime, getBangkokDateKey, toDateTimeLocalValue, toSupabaseDateTime } from '../lib/dateTime'
 import { motion } from 'framer-motion'
-import { Edit2, Plus, MapPin, Calendar, Trash2, XCircle } from 'lucide-react'
+import { Edit2, Plus, MapPin, Calendar, Trash2, XCircle, ChevronDown, ChevronUp } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { useTeam } from '../contexts/TeamContext'
 
@@ -19,14 +19,16 @@ export const EventsPage = () => {
   const navigate = useNavigate()
   const location = useLocation()
   const { user } = useAuth()
-  const { currentTeam, loading: teamsLoading } = useTeam()
+  const { teams, currentTeam, loading: teamsLoading, setCurrentTeam } = useTeam()
   const [events, setEvents] = useState([])
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
+  const [switchTeamModalOpen, setSwitchTeamModalOpen] = useState(false)
   const [currentUserRole, setCurrentUserRole] = useState('user')
   const [editingEvent, setEditingEvent] = useState(null)
   const [actionLoading, setActionLoading] = useState(false)
   const [formData, setFormData] = useState(emptyForm)
+  const [pastEventsExpanded, setPastEventsExpanded] = useState(false)
 
   useEffect(() => {
     if (!currentTeam) {
@@ -152,6 +154,12 @@ export const EventsPage = () => {
     }
   }
 
+  const handleHeaderTeamClick = () => {
+    if (teams.length > 0) {
+      setSwitchTeamModalOpen(true)
+    }
+  }
+
   const todayKey = getBangkokDateKey(new Date())
   const todayEvents = events.filter((event) => getBangkokDateKey(event.date) === todayKey)
   const upcomingEvents = events.filter((event) => getBangkokDateKey(event.date) > todayKey)
@@ -173,7 +181,20 @@ export const EventsPage = () => {
     >
       <Header
         title="Events"
-        subtitle={currentTeam?.teams?.name || 'No team selected'}
+        subtitleContent={
+          <button
+            type="button"
+            onClick={handleHeaderTeamClick}
+            className="mt-2 inline-flex rounded-full transition hover:opacity-90"
+          >
+            <Badge
+              status={currentTeam?.teams?.name ? 'success' : 'warning'}
+              className="cursor-pointer bg-white/15 text-white border border-white/20"
+            >
+              {currentTeam?.teams?.name || 'No team selected'}
+            </Badge>
+          </button>
+        }
         action={
           currentTeam ? (
             <button
@@ -227,7 +248,7 @@ export const EventsPage = () => {
                               {formatBangkokDateTime(event.date)}
                             </p>
                           </div>
-                          <Badge status={event.status === 'CANCELLED' ? 'error' : getBangkokDateKey(event.date) === todayKey ? 'success' : 'default'}>
+                          <Badge status={event.status === 'CANCELLED' ? 'error' : getBangkokDateKey(event.date) === todayKey ? 'success' : 'warning'}>
                             {event.status === 'CANCELLED'
                               ? 'Cancelled'
                               : getBangkokDateKey(event.date) === todayKey
@@ -313,7 +334,7 @@ export const EventsPage = () => {
                               {formatBangkokDateTime(event.date)}
                             </p>
                           </div>
-                          <Badge status={event.status === 'CANCELLED' ? 'error' : 'default'}>
+                          <Badge status={event.status === 'CANCELLED' ? 'error' : 'warning'}>
                             {event.status === 'CANCELLED' ? 'Cancelled' : 'Upcoming'}
                           </Badge>
                         </div>
@@ -374,30 +395,53 @@ export const EventsPage = () => {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.1 }}
               >
-                <h2 className="text-sm font-semibold text-neutral-600 mb-3 uppercase">
-                  Past Events
-                </h2>
-                <div className="space-y-3">
-                  {pastEvents.map((event) => (
-                    <Card
-                      key={event.id}
-                      onClick={() => navigate(`/event/${event.id}`)}
-                      className="cursor-pointer opacity-60 hover:opacity-100 transition"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h3 className="font-semibold">{event.title}</h3>
-                          <p className="text-sm text-neutral-600">
-                            {formatBangkokDateTime(event.date)}
-                          </p>
-                        </div>
-                        <Badge status={event.status === 'CANCELLED' ? 'error' : 'default'}>
-                          {event.status}
-                        </Badge>
+                <Card className="hover:shadow-sm transition">
+                  <button
+                    type="button"
+                    className="w-full"
+                    onClick={() => setPastEventsExpanded((prev) => !prev)}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-left">
+                        <h2 className="text-sm font-semibold text-neutral-700 uppercase">Completed Events</h2>
+                        <p className="text-xs text-neutral-500">{`${pastEvents.length} events saved`}</p>
                       </div>
-                    </Card>
-                  ))}
-                </div>
+                      <span className="text-neutral-500">
+                        {pastEventsExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                      </span>
+                    </div>
+                  </button>
+
+                {pastEventsExpanded && (
+                  <div className="mt-3 space-y-3 border-t border-neutral-200 pt-3">
+                    {pastEvents.map((event) => (
+                      <div
+                        key={event.id}
+                        onClick={() => navigate(`/event/${event.id}`)}
+                        className="cursor-pointer rounded-xl border border-neutral-200 bg-neutral-50 p-4 opacity-75 hover:opacity-100 transition"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h3 className="font-semibold">{event.title}</h3>
+                            <p className="text-sm text-neutral-600">
+                              {formatBangkokDateTime(event.date)}
+                            </p>
+                          </div>
+                          <Badge status={event.status === 'CANCELLED' ? 'error' : getBangkokDateKey(event.date) === todayKey ? 'success' : getBangkokDateKey(event.date) > todayKey ? 'warning' : 'success'}>
+                            {event.status === 'CANCELLED'
+                              ? 'Cancelled'
+                              : getBangkokDateKey(event.date) === todayKey
+                              ? 'Today'
+                              : getBangkokDateKey(event.date) > todayKey
+                              ? 'Upcoming'
+                              : 'Completed'}
+                          </Badge>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                </Card>
               </motion.div>
             )}
 
@@ -416,6 +460,50 @@ export const EventsPage = () => {
           </>
         )}
       </div>
+
+      <Modal
+        isOpen={switchTeamModalOpen}
+        onClose={() => setSwitchTeamModalOpen(false)}
+        title="Select Team"
+        footer={
+          <Button
+            variant="secondary"
+            onClick={() => setSwitchTeamModalOpen(false)}
+            className="w-full"
+          >
+            Close
+          </Button>
+        }
+      >
+        <div className="space-y-3">
+          {teams.map((team) => (
+            <Card
+              key={team.team_id}
+              className={`cursor-pointer transition ${
+                currentTeam?.team_id === team.team_id ? 'ring-2 ring-primary-400' : ''
+              }`}
+              onClick={() => {
+                setCurrentTeam(team)
+                setSwitchTeamModalOpen(false)
+              }}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-semibold">{team.teams?.name || 'Unnamed Team'}</p>
+                  <p className="text-xs text-neutral-600">
+                    Joined {team.joined_at ? new Date(team.joined_at).toLocaleDateString() : '-'}
+                  </p>
+                </div>
+                {currentTeam?.team_id === team.team_id && (
+                  <span className="text-xs font-semibold uppercase text-primary-400">
+                    Current
+                  </span>
+                )}
+              </div>
+            </Card>
+          ))}
+        </div>
+      </Modal>
 
       <Modal
         isOpen={modalOpen}

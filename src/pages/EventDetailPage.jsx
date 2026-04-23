@@ -3,14 +3,17 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { Header, Card, Button, Badge, BottomNav, Modal, Input } from '../components'
 import {
   checkinParticipant,
+  confirmPaymentTransfer,
+  createPaymentTransfer,
   createExpense,
-  deleteEvent,
   getEventDetail,
   getEventExpenses,
+  getEventPaymentTransfers,
   getEventParticipants,
-  getEventPayments,
+  getTeam,
+  getTeamMembers,
+  getPaymentInfo,
   getUserProfile,
-  savePayment,
   updateExpenseStatus,
   updateEvent,
 } from '../lib/api'
@@ -18,7 +21,7 @@ import { forgetCheckedInEvent, hasCheckedInEvent, rememberCheckedInEvent } from 
 import { formatVndAmount } from '../lib/currency'
 import { formatBangkokDateTime, getBangkokDateKey, toDateTimeLocalValue, toSupabaseDateTime } from '../lib/dateTime'
 import { motion } from 'framer-motion'
-import { CheckCircle2, Edit2, QrCode, Trash2, XCircle } from 'lucide-react'
+import { CheckCircle2, QrCode } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 
 export const EventDetailPage = () => {
@@ -27,8 +30,9 @@ export const EventDetailPage = () => {
   const { user } = useAuth()
   const [event, setEvent] = useState(null)
   const [participants, setParticipants] = useState([])
+  const [teamMemberCount, setTeamMemberCount] = useState(0)
   const [expenses, setExpenses] = useState([])
-  const [payments, setPayments] = useState([])
+  const [paymentTransfers, setPaymentTransfers] = useState([])
   const [loading, setLoading] = useState(true)
   const [paymentModalOpen, setPaymentModalOpen] = useState(false)
   const [expenseModalOpen, setExpenseModalOpen] = useState(false)
@@ -37,9 +41,16 @@ export const EventDetailPage = () => {
   const [currentUserName, setCurrentUserName] = useState('')
   const [actionLoading, setActionLoading] = useState(false)
   const [expenseActionId, setExpenseActionId] = useState(null)
+  const [paymentActionId, setPaymentActionId] = useState(null)
   const [loadError, setLoadError] = useState('')
   const [expenseForm, setExpenseForm] = useState({ amount: '', description: '' })
-  const [paymentForm, setPaymentForm] = useState({ amount: '' })
+  const [receiverPaymentInfo, setReceiverPaymentInfo] = useState(null)
+  const [receiverName, setReceiverName] = useState('Treasurer')
+  const [teamTreasurerId, setTeamTreasurerId] = useState(null)
+  const [paymentModalMode, setPaymentModalMode] = useState('PAY_TREASURER')
+  const [paymentTarget, setPaymentTarget] = useState(null)
+  const [paymentTargetInfo, setPaymentTargetInfo] = useState(null)
+  const [activeTab, setActiveTab] = useState('settlement')
   const [eventForm, setEventForm] = useState({
     title: '',
     date: '',
@@ -57,11 +68,11 @@ export const EventDetailPage = () => {
   const loadData = async () => {
     try {
       setLoadError('')
-      const [eventResult, participantsResult, expensesResult, paymentsResult, profileResult] = await Promise.allSettled([
+      const [eventResult, participantsResult, expensesResult, transfersResult, profileResult] = await Promise.allSettled([
         getEventDetail(eventId),
         getEventParticipants(eventId),
         getEventExpenses(eventId),
-        getEventPayments(eventId),
+        getEventPaymentTransfers(eventId),
         getUserProfile(user.id),
       ])
 
@@ -72,11 +83,29 @@ export const EventDetailPage = () => {
       const eventData = eventResult.value
       const participantsData = participantsResult.status === 'fulfilled' ? participantsResult.value : null
       const expensesData = expensesResult.status === 'fulfilled' ? expensesResult.value : null
-      const paymentsData = paymentsResult.status === 'fulfilled' ? paymentsResult.value : null
+      const transfersData = transfersResult.status === 'fulfilled' ? transfersResult.value : null
       const profileData = profileResult.status === 'fulfilled' ? profileResult.value : null
-      const existingUserPayment = (paymentsData || payments).find((payment) => String(payment.user_id) === String(user.id))
 
       setEvent(eventData)
+      let treasuryUserId = null
+      if (eventData?.team_id) {
+        try {
+          const [teamMembersData, teamData] = await Promise.all([
+            getTeamMembers(eventData.team_id),
+            getTeam(eventData.team_id),
+          ])
+          setTeamMemberCount(teamMembersData.length)
+          treasuryUserId = teamData?.treasurer_id || null
+          setTeamTreasurerId(treasuryUserId)
+        } catch (error) {
+          console.error('Error loading team data:', error)
+          setTeamMemberCount(0)
+          setTeamTreasurerId(null)
+        }
+      } else {
+        setTeamMemberCount(0)
+        setTeamTreasurerId(null)
+      }
       if (participantsData) {
         setParticipants(participantsData)
         const userCheckedIn = participantsData.some(
@@ -92,16 +121,36 @@ export const EventDetailPage = () => {
       if (expensesData) {
         setExpenses(expensesData)
       }
-      if (paymentsData) {
-        setPayments(paymentsData)
+      if (transfersData) {
+        setPaymentTransfers(transfersData)
       }
       if (profileData) {
         setCurrentUserRole((profileData.role || 'user').toLowerCase())
         setCurrentUserName(profileData.name || '')
       }
-      setPaymentForm({
-        amount: existingUserPayment ? String(existingUserPayment.amount) : '',
-      })
+
+      if (treasuryUserId) {
+        const [receiverProfileResult, receiverPaymentInfoResult] = await Promise.allSettled([
+          getUserProfile(treasuryUserId),
+          getPaymentInfo(treasuryUserId),
+        ])
+
+        if (receiverProfileResult.status === 'fulfilled') {
+          setReceiverName(receiverProfileResult.value?.name || 'Treasurer')
+        } else {
+          setReceiverName('Treasurer')
+        }
+
+        if (receiverPaymentInfoResult.status === 'fulfilled') {
+          setReceiverPaymentInfo(receiverPaymentInfoResult.value)
+        } else {
+          setReceiverPaymentInfo(null)
+        }
+      } else {
+        setReceiverName('Treasurer not set')
+        setReceiverPaymentInfo(null)
+      }
+
       setEventForm({
         title: eventData.title || '',
         date: toDateTimeLocalValue(eventData.date),
@@ -116,14 +165,45 @@ export const EventDetailPage = () => {
     }
   }
 
+  const handleOpenTreasuryTransferModal = async () => {
+    setPaymentModalMode('PAY_TREASURER')
+    setPaymentTarget(null)
+    setPaymentTargetInfo(null)
+    setPaymentModalOpen(true)
+  }
+
+  const handleOpenPayoutModal = async (target) => {
+    try {
+      setActionLoading(true)
+      setPaymentModalMode('PAY_MEMBER')
+      setPaymentTarget(target)
+      const info = await getPaymentInfo(target.user_id)
+      setPaymentTargetInfo(info)
+      setPaymentModalOpen(true)
+    } catch (error) {
+      console.error('Error loading payout target info:', error)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
   const canManageEvent =
     event?.created_by === user?.id || ['admin', 'sub_admin'].includes(currentUserRole)
   const canAutoApproveExpense = ['admin', 'sub_admin'].includes(currentUserRole)
+  const isTeamTreasurer = Boolean(teamTreasurerId) && String(teamTreasurerId) === String(user.id)
+  const canManageTreasury = isTeamTreasurer
 
+  const eventStartAtMs = event?.date ? new Date(event.date).getTime() : Number.NaN
+  const hasValidEventStartAt = Number.isFinite(eventStartAtMs)
+  const isEventPast = hasValidEventStartAt ? eventStartAtMs < Date.now() : false
   const isToday = event?.date ? getBangkokDateKey(event.date) === getBangkokDateKey(new Date()) : false
+  const isUpcomingEvent = hasValidEventStartAt ? eventStartAtMs > Date.now() : false
+  const requiresCheckInForDetails = isToday || isEventPast
+  const headerStatusLabel = isToday ? 'Today' : isUpcomingEvent ? 'Upcoming' : ''
+  const headerStatusBadge = isToday ? 'success' : isUpcomingEvent ? 'warning' : 'default'
   const currentParticipant = participants.find((participant) => String(participant.user_id) === String(user.id))
   const isCheckedIn = isParticipantCheckedIn(currentParticipant) || hasCheckedInEvent(user.id, eventId)
-  const canViewProtectedDetails = canManageEvent || isCheckedIn || !isToday || event?.status === 'CANCELLED'
+  const canViewProtectedDetails = canManageEvent || !requiresCheckInForDetails || isCheckedIn
   const checkedInAtLabel = currentParticipant?.checked_in_at
     ? formatBangkokDateTime(currentParticipant.checked_in_at)
     : ''
@@ -161,6 +241,18 @@ export const EventDetailPage = () => {
     }
   }
 
+  const handleConfirmPaymentReceived = async (transferId) => {
+    try {
+      setPaymentActionId(transferId)
+      await confirmPaymentTransfer(transferId)
+      await loadData()
+    } catch (error) {
+      console.error('Error confirming payment:', error)
+    } finally {
+      setPaymentActionId(null)
+    }
+  }
+
   const handleCreateExpense = async () => {
     try {
       setActionLoading(true)
@@ -185,13 +277,42 @@ export const EventDetailPage = () => {
   const handleSavePayment = async () => {
     try {
       setActionLoading(true)
-      await savePayment({
-        event_id: eventId,
-        team_id: event.team_id,
-        user_id: user.id,
-        amount: parseFloat(paymentForm.amount),
-        status: 'CONFIRMED',
-      })
+
+      if (paymentModalMode === 'PAY_TREASURER') {
+        if (!isCheckedIn || transferAmount <= 0 || !teamTreasurerId) {
+          setPaymentModalOpen(false)
+          return
+        }
+
+        await createPaymentTransfer({
+          team_id: event.team_id,
+          event_id: eventId,
+          from_user_id: user.id,
+          to_user_id: teamTreasurerId,
+          amount: transferAmount,
+          direction: 'TO_TREASURY',
+          status: 'WAITING_CONFIRM',
+        })
+      } else if (paymentModalMode === 'PAY_MEMBER') {
+        if (!paymentTarget?.user_id || payoutTransferAmount <= 0 || !teamTreasurerId) {
+          setPaymentModalOpen(false)
+          return
+        }
+
+        await createPaymentTransfer({
+          team_id: event.team_id,
+          event_id: eventId,
+          from_user_id: teamTreasurerId,
+          to_user_id: paymentTarget.user_id,
+          amount: payoutTransferAmount,
+          direction: 'FROM_TREASURY',
+          status: 'WAITING_CONFIRM',
+        })
+      } else {
+        setPaymentModalOpen(false)
+        return
+      }
+
       setPaymentModalOpen(false)
       await loadData()
     } catch (error) {
@@ -226,30 +347,6 @@ export const EventDetailPage = () => {
       await loadData()
     } catch (error) {
       console.error('Error updating event:', error)
-    } finally {
-      setActionLoading(false)
-    }
-  }
-
-  const handleCancelEvent = async () => {
-    try {
-      setActionLoading(true)
-      await updateEvent(eventId, { status: 'CANCELLED' })
-      await loadData()
-    } catch (error) {
-      console.error('Error cancelling event:', error)
-    } finally {
-      setActionLoading(false)
-    }
-  }
-
-  const handleDeleteEvent = async () => {
-    try {
-      setActionLoading(true)
-      await deleteEvent(eventId)
-      navigate('/events')
-    } catch (error) {
-      console.error('Error deleting event:', error)
     } finally {
       setActionLoading(false)
     }
@@ -291,25 +388,182 @@ export const EventDetailPage = () => {
   const totalExpense = approvedExpenses.reduce((sum, expense) => sum + parseFloat(expense.amount), 0)
   const share = checkedInCount > 0 ? totalExpense / checkedInCount : 0
   const userShare = isCheckedIn ? share : 0
-  const recordedUserPayment = payments.find((payment) => String(payment.user_id) === String(user.id))
-  const hasSettlementPayment = Boolean(recordedUserPayment)
+  const treasuryUserId = teamTreasurerId
+  const transferStatus = (status) => String(status || '').toUpperCase()
+  const transferDirection = (direction) => String(direction || '').toUpperCase().trim()
+  const isTransferConfirmed = (status) => ['CONFIRMED', 'COMPLETE', 'COMPLETED'].includes(transferStatus(status))
+  const isTransferWaiting = (status) => ['WAITING_CONFIRM', 'WAITING', 'PENDING'].includes(transferStatus(status))
+  const isToTreasuryDirection = (direction) => transferDirection(direction) === 'TO_TREASURY'
+  const isFromTreasuryDirection = (direction) => transferDirection(direction) === 'FROM_TREASURY'
+  const isToTreasuryTransfer = (transfer) =>
+    isToTreasuryDirection(transfer.direction) || (!transfer.direction && String(transfer.to_user_id) === String(treasuryUserId))
+  const isFromTreasuryTransfer = (transfer) =>
+    isFromTreasuryDirection(transfer.direction) || (!transfer.direction && String(transfer.from_user_id) === String(treasuryUserId))
+
+  const userToTreasuryTransfers = paymentTransfers.filter(
+    (transfer) =>
+      String(transfer.from_user_id) === String(user.id) &&
+      String(transfer.to_user_id) === String(treasuryUserId) &&
+      isToTreasuryTransfer(transfer)
+  )
+
+  const confirmedUserToTreasuryAmount = userToTreasuryTransfers
+    .filter((transfer) => isTransferConfirmed(transfer.status))
+    .reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
+
+  const waitingUserToTreasuryAmount = userToTreasuryTransfers
+    .filter((transfer) => isTransferWaiting(transfer.status))
+    .reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
+
+  const latestWaitingUserToTreasuryTransfer = userToTreasuryTransfers.find((transfer) => isTransferWaiting(transfer.status))
+
   const userApprovedExpenseTotal = approvedExpenses
     .filter((expense) => String(expense.user_id) === String(user.id))
     .reduce((sum, expense) => sum + parseFloat(expense.amount), 0)
-  const settlementPaymentAmount = recordedUserPayment ? Number(recordedUserPayment.amount) : 0
-  const userPaidTotal = settlementPaymentAmount + userApprovedExpenseTotal
+  const transferAmount = Math.max(userShare - userApprovedExpenseTotal - confirmedUserToTreasuryAmount, 0)
+
+  const userPaymentStatus =
+    transferAmount <= 0
+      ? 'complete'
+      : waitingUserToTreasuryAmount > 0
+      ? 'waiting_confirm'
+      : 'pending'
+
+  const userPaidTotal = confirmedUserToTreasuryAmount + userApprovedExpenseTotal
   const balance = isCheckedIn ? userPaidTotal - share : 0
+
+  const waitingConfirmationPayments = paymentTransfers.filter(
+    (transfer) =>
+      String(transfer.to_user_id) === String(treasuryUserId) &&
+      isToTreasuryTransfer(transfer) &&
+      isTransferWaiting(transfer.status)
+  )
+
+  const incomingPayoutTransfers = paymentTransfers.filter(
+    (transfer) =>
+      String(transfer.from_user_id) === String(treasuryUserId) &&
+      String(transfer.to_user_id) === String(user.id) &&
+      isFromTreasuryTransfer(transfer)
+  )
+
+  const waitingIncomingPayoutTransfer = incomingPayoutTransfers.find((transfer) => isTransferWaiting(transfer.status))
+
+  const membersNeedingPayout = participants
+    .filter((participant) => isParticipantCheckedIn(participant))
+    .map((participant) => {
+      const participantApprovedExpense = approvedExpenses
+        .filter((expense) => String(expense.user_id) === String(participant.user_id))
+        .reduce((sum, expense) => sum + Number(expense.amount || 0), 0)
+
+      const memberToTreasuryConfirmed = paymentTransfers
+        .filter(
+          (transfer) =>
+            String(transfer.from_user_id) === String(participant.user_id) &&
+            String(transfer.to_user_id) === String(treasuryUserId) &&
+            isToTreasuryTransfer(transfer) &&
+            isTransferConfirmed(transfer.status)
+        )
+        .reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
+
+      const treasuryToMemberConfirmed = paymentTransfers
+        .filter(
+          (transfer) =>
+            String(transfer.from_user_id) === String(treasuryUserId) &&
+            String(transfer.to_user_id) === String(participant.user_id) &&
+            isFromTreasuryTransfer(transfer) &&
+            isTransferConfirmed(transfer.status)
+        )
+        .reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
+
+      const treasuryToMemberWaiting = paymentTransfers
+        .find(
+          (transfer) =>
+            String(transfer.from_user_id) === String(treasuryUserId) &&
+            String(transfer.to_user_id) === String(participant.user_id) &&
+            isFromTreasuryTransfer(transfer) &&
+            isTransferWaiting(transfer.status)
+        )
+
+      const memberPaidTotal = memberToTreasuryConfirmed + participantApprovedExpense - treasuryToMemberConfirmed
+      const memberBalance = memberPaidTotal - share
+      const payoutNeeded = Math.max(memberBalance, 0)
+
+      return {
+        user_id: participant.user_id,
+        name: participant.users?.name || 'Member',
+        payoutNeeded,
+        waitingTransfer: treasuryToMemberWaiting || null,
+      }
+    })
+    .filter((member) => String(member.user_id) !== String(treasuryUserId) && member.payoutNeeded > 0)
+
+  const payoutTransferAmount = paymentTarget
+    ? Math.max(paymentTarget.payoutNeeded - (Number(paymentTarget?.waitingTransfer?.amount || 0)), 0)
+    : 0
+
+  const confirmedToTreasuryAmount = paymentTransfers
+    .filter(
+      (transfer) =>
+        String(transfer.to_user_id) === String(treasuryUserId) &&
+        isToTreasuryTransfer(transfer) &&
+        isTransferConfirmed(transfer.status)
+    )
+    .reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
+
+  const confirmedFromTreasuryAmount = paymentTransfers
+    .filter(
+      (transfer) =>
+        String(transfer.from_user_id) === String(treasuryUserId) &&
+        isFromTreasuryTransfer(transfer) &&
+        isTransferConfirmed(transfer.status)
+    )
+    .reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
+
+  const treasuryApprovedExpenseTotal = approvedExpenses
+    .filter((expense) => String(expense.user_id) === String(treasuryUserId))
+    .reduce((sum, expense) => sum + Number(expense.amount || 0), 0)
+
+  const treasuryNetFund = confirmedToTreasuryAmount - confirmedFromTreasuryAmount - treasuryApprovedExpenseTotal
+
+  const userPaymentStatusLabel =
+    userPaymentStatus === 'complete'
+      ? 'Complete'
+      : userPaymentStatus === 'waiting_confirm'
+      ? 'Waiting Confirm'
+      : 'Pending'
+
+  const userPaymentStatusBadge =
+    userPaymentStatus === 'complete'
+      ? 'success'
+      : userPaymentStatus === 'waiting_confirm'
+      ? 'warning'
+      : 'warning'
+
+  const paymentActionLabel =
+    userPaymentStatus === 'complete'
+      ? 'View Transfer Info'
+      : userPaymentStatus === 'waiting_confirm'
+      ? 'Waiting Confirm'
+      : 'Transfer & Confirm'
+
+  const paymentStatusBadgeClassName =
+    userPaymentStatus === 'complete'
+      ? 'border border-success-300 bg-white'
+      : 'border border-warning-300'
+
+  const paymentStatusHint =
+    userPaymentStatus === 'waiting_confirm'
+      ? `Transferred đ ${formatVndAmount(Number(latestWaitingUserToTreasuryTransfer?.amount || waitingUserToTreasuryAmount || 0))} - waiting for treasurer confirmation`
+      : balance < 0
+      ? 'You need to pay this amount.'
+      : balance > 0
+      ? 'The fund will reimburse this amount to you, so you do not need to transfer more.'
+      : 'No additional transfer is needed.'
+
   const userPayment = {
     amount: userPaidTotal,
-    status: `Expense advanced: đ ${userApprovedExpenseTotal.toFixed(2)} | Settlement payment: đ ${settlementPaymentAmount.toFixed(2)}`,
+    status: `Expense advanced: đ ${userApprovedExpenseTotal.toFixed(2)} | Settlement confirmed: đ ${confirmedUserToTreasuryAmount.toFixed(2)}`,
   }
-  const eventBadgeStatus = event?.status === 'CANCELLED' ? 'error' : event?.status === 'COMPLETED' ? 'success' : isToday ? 'success' : 'warning'
-  const eventBadgeLabel =
-    event?.status === 'CANCELLED'
-      ? 'Cancelled'
-      : isToday
-      ? 'Today'
-      : event?.status
 
   return (
     <motion.div
@@ -317,10 +571,25 @@ export const EventDetailPage = () => {
       animate={{ opacity: 1 }}
       className="pb-24"
     >
-      <Header title={event?.title || 'Event Detail'} subtitle={formatBangkokDateTime(event?.date)} />
+      <Header
+        title={event?.title || 'Event Detail'}
+        action={
+          headerStatusLabel ? (
+            <Badge status={headerStatusBadge}>
+              {headerStatusLabel}
+            </Badge>
+          ) : null
+        }
+        subtitleContent={(
+          <div className="text-sm opacity-90 space-y-1">
+            <p>{formatBangkokDateTime(event?.date)}</p>
+            <p>{`Location: ${event?.court_number ? `Court ${event.court_number}` : 'Court not assigned'}`} - {`${event?.location || 'Location not set'}`}</p>
+          </div>
+        )}
+      />
 
       <div className="container-mobile py-6 space-y-6">
-        {isToday && event?.status !== 'CANCELLED' && (
+        {isToday && !isEventPast && event?.status !== 'CANCELLED' && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -354,16 +623,10 @@ export const EventDetailPage = () => {
 
         {!canViewProtectedDetails ? (
           <Card className="space-y-4">
-            <div>
-              <p className="text-xs text-neutral-600">Location</p>
-              <p className="font-semibold">{event?.location || 'Location not set'}</p>
-            </div>
-            <div>
-              <p className="text-xs text-neutral-600">Court</p>
-              <p className="font-semibold">{event?.court_number ? `Court ${event.court_number}` : 'Court not assigned'}</p>
-            </div>
             <p className="text-sm text-neutral-600">
-              Check in from the Home page before opening today&apos;s event details.
+              {isEventPast
+                ? 'You did not check in for this event, so the event details are not available.'
+                : 'Check in from the Home page before opening today\'s event details.'}
             </p>
             <p className="text-sm text-neutral-600">
               {`Your amount stays at đ ${formatVndAmount(0)} if you do not check in for this event.`}
@@ -374,60 +637,65 @@ export const EventDetailPage = () => {
           </Card>
         ) : (
           <>
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-            >
-              <Card className="space-y-4">
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                  <div>
-                    <p className="text-xs text-neutral-600">Event Time</p>
-                    <p className="font-semibold">{formatBangkokDateTime(event?.date)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-neutral-600">Location</p>
-                    <p className="font-semibold">{event?.location || 'Location not set'}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-neutral-600">Court</p>
-                    <p className="font-semibold">{event?.court_number ? `Court ${event.court_number}` : 'Court not assigned'}</p>
-                  </div>
-                </div>
-                <Badge status={eventBadgeStatus}>
-                  {eventBadgeLabel}
-                </Badge>
-                {canManageEvent && (
-                  <div className="grid grid-cols-3 gap-2 pt-2">
-                    <Button variant="secondary" onClick={() => setEditModalOpen(true)}>
-                      <span className="inline-flex items-center gap-2">
-                        <Edit2 size={14} />
-                        Edit
-                      </span>
-                    </Button>
-                    {event?.status !== 'CANCELLED' && (
-                      <Button variant="secondary" onClick={handleCancelEvent} loading={actionLoading}>
-                        <span className="inline-flex items-center gap-2">
-                          <XCircle size={14} />
-                          Cancel
-                        </span>
-                      </Button>
-                    )}
-                    <Button variant="danger" onClick={handleDeleteEvent} loading={actionLoading}>
-                      <span className="inline-flex items-center gap-2">
-                        <Trash2 size={14} />
-                        Delete
-                      </span>
-                    </Button>
-                  </div>
+            <Card className="p-2 space-y-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500 px-2">
+                Sections
+              </p>
+              <div className={`grid gap-2 ${(canAutoApproveExpense || canManageTreasury) ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'}`}>
+                <button
+                  type="button"
+                  className={`rounded-lg border px-3 py-2.5 text-xs font-semibold transition ${
+                    activeTab === 'settlement'
+                      ? 'border-primary-400 bg-primary-400 text-white shadow-sm'
+                      : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50'
+                  }`}
+                  onClick={() => setActiveTab('settlement')}
+                >
+                  Settlement
+                </button>
+                <button
+                  type="button"
+                  className={`rounded-lg border px-3 py-2.5 text-xs font-semibold transition ${
+                    activeTab === 'participants'
+                      ? 'border-primary-400 bg-primary-400 text-white shadow-sm'
+                      : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50'
+                  }`}
+                  onClick={() => setActiveTab('participants')}
+                >
+                  {`Participants`}
+                </button>
+                <button
+                  type="button"
+                  className={`rounded-lg border px-3 py-2.5 text-xs font-semibold transition ${
+                    activeTab === 'expenses'
+                      ? 'border-primary-400 bg-primary-400 text-white shadow-sm'
+                      : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50'
+                  }`}
+                  onClick={() => setActiveTab('expenses')}
+                >
+                  {`Expenses`}
+                </button>
+                {(canAutoApproveExpense || canManageTreasury) && (
+                  <button
+                    type="button"
+                    className={`rounded-lg border px-3 py-2.5 text-xs font-semibold transition ${
+                      activeTab === 'treasury'
+                        ? 'border-primary-400 bg-primary-400 text-white shadow-sm'
+                        : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50'
+                    }`}
+                    onClick={() => setActiveTab('treasury')}
+                  >
+                    Treasury
+                  </button>
                 )}
-              </Card>
-            </motion.div>
+              </div>
+            </Card>
 
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 }}
-            >
+            {activeTab === 'settlement' && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+              >
               <h2 className="text-sm font-semibold text-neutral-600 mb-3 uppercase">
                 Settlement
               </h2>
@@ -442,55 +710,205 @@ export const EventDetailPage = () => {
                 </Card>
               </div>
 
-              <Card className="mt-3">
-                <div className="flex items-center justify-between gap-3">
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Card>
+                  <p className="text-xs text-neutral-600">Your Paid Total</p>
+                  <p className="text-2xl font-bold text-primary-400">
+                    {`đ ${formatVndAmount(userPayment ? Number(userPayment.amount) : 0)}`}
+                  </p>
+                  {!isCheckedIn && !isUpcomingEvent && (
+                    <p className="text-xs text-neutral-600 mt-3">
+                      {`You did not join this event, so your payment amount stays at đ ${formatVndAmount(0)}.`}
+                    </p>
+                  )}
+                </Card>
+
+                <Card className={balance < 0 ? 'bg-error-50' : 'bg-success-50'}>
+                  <p className="text-xs text-neutral-600">Your Balance</p>
+                  <p className={`text-2xl font-bold ${balance < 0 ? 'text-error-800' : 'text-success-700'}`}>
+                    {balance < 0 ? `đ -${formatVndAmount(Math.abs(balance))}` : `đ ${formatVndAmount(balance)}`}
+                  </p>
+                </Card>
+              </div>
+
+              <Card className={`mt-3 ${balance < 0 ? 'bg-error-50 border-error-200' : 'bg-success-50 border-success-200'}`}>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <p className="text-xs text-neutral-600">Your Paid Total</p>
-                    <p className="text-2xl font-bold text-primary-400">
-                      {`đ ${formatVndAmount(userPayment ? Number(userPayment.amount) : 0)}`}
-                    </p>
-                    <p className="text-xs text-neutral-600 mt-1">
-                      {`Advanced: đ ${formatVndAmount(userApprovedExpenseTotal)}`}
-                    </p>
-                    <p className="text-xs text-neutral-600">
-                      {`Settlement: đ ${formatVndAmount(settlementPaymentAmount)}`}
+                    <p className="text-xs text-neutral-600">Payment Status</p>
+                    <Badge status={userPaymentStatusBadge} className={paymentStatusBadgeClassName}>{userPaymentStatusLabel}</Badge>
+                    <p className={`mt-2 text-xs ${userPaymentStatus === 'waiting_confirm' ? 'text-warning-900' : 'text-neutral-600'}`}>
+                      {paymentStatusHint}
                     </p>
                   </div>
-                  <Button
-                    onClick={() => setPaymentModalOpen(true)}
-                    variant="secondary"
-                    disabled={!isCheckedIn}
-                  >
-                    {hasSettlementPayment ? 'Update Payment' : 'Add Payment'}
-                  </Button>
+                  {balance < 0 && isCheckedIn && (
+                    <Button
+                      onClick={handleOpenTreasuryTransferModal}
+                      variant="secondary"
+                      className="w-full border border-warning-400 sm:w-auto"
+                      disabled={userPaymentStatus === 'waiting_confirm' || transferAmount <= 0 || !treasuryUserId}
+                    >
+                      {paymentActionLabel}
+                    </Button>
+                  )}
                 </div>
-                {!isCheckedIn && (
-                  <p className="text-xs text-neutral-600 mt-3">
-                    {`You did not join this event, so your payment amount stays at đ ${formatVndAmount(0)}.`}
-                  </p>
-                )}
               </Card>
 
-              <Card className={`mt-3 ${balance < 0 ? 'bg-error-50' : 'bg-success-50'}`}>
-                <p className="text-xs text-neutral-600">Your Balance</p>
-                <p className={`text-2xl font-bold ${balance < 0 ? 'text-error-800' : 'text-success-700'}`}>
-                  {balance < 0 ? `đ ${formatVndAmount(Math.abs(balance))} Owed` : `đ ${formatVndAmount(balance)}`}
-                </p>
-                {balance < 0 && (
-                  <p className="mt-2 text-xs text-neutral-600">
-                    You need to pay this amount for this event.
+              {waitingIncomingPayoutTransfer && (
+                <Card className="mt-3 space-y-2 bg-warning-50 border-warning-200">
+                  <p className="text-xs text-neutral-600 uppercase">Incoming Transfer Confirmation</p>
+                  <p className="text-sm text-neutral-700">
+                    {`Treasury marked transfer: đ ${formatVndAmount(waitingIncomingPayoutTransfer.amount)}. Confirm when received.`}
                   </p>
-                )}
-              </Card>
+                  <Button
+                    onClick={() => handleConfirmPaymentReceived(waitingIncomingPayoutTransfer.id)}
+                    variant="secondary"
+                    className="w-full border border-warning-400 sm:w-auto"
+                    loading={paymentActionId === waitingIncomingPayoutTransfer.id}
+                    disabled={paymentActionId === waitingIncomingPayoutTransfer.id}
+                  >
+                    Confirm Received
+                  </Button>
+                </Card>
+              )}
+              {balance < 0 && isCheckedIn && !treasuryUserId && (
+                <p className="text-xs text-warning-900">This team does not have a treasurer yet. Ask admin/sub-admin to set one.</p>
+              )}
             </motion.div>
+            )}
 
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 }}
-            >
+            {activeTab === 'treasury' && (canAutoApproveExpense || canManageTreasury) && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+              >
               <h2 className="text-sm font-semibold text-neutral-600 mb-3 uppercase">
-                Participants ({checkedInCount})
+                Treasury
+              </h2>
+
+              <Card className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-neutral-600 uppercase">Treasurer Info</p>
+                  <Badge status="default">{receiverName}</Badge>
+                </div>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  <div>
+                    <p className="text-xs text-neutral-600">Bank</p>
+                    <p className="font-semibold">{receiverPaymentInfo?.bank_name || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-neutral-600">Account Name</p>
+                    <p className="font-semibold">{receiverPaymentInfo?.account_name || receiverName}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-neutral-600">Account Number</p>
+                    <p className="font-mono text-sm font-semibold">{receiverPaymentInfo?.account_number || '-'}</p>
+                  </div>
+                </div>
+              </Card>
+
+              {waitingConfirmationPayments.length > 0 && (
+                <Card className="mt-3 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-neutral-600 uppercase">Pending Payment Confirmations</p>
+                    <Badge status="warning">{waitingConfirmationPayments.length}</Badge>
+                  </div>
+                  <div className="space-y-2">
+                    {waitingConfirmationPayments.map((payment) => (
+                      <div key={payment.id} className="flex items-center justify-between gap-2 border-b last:border-b-0 py-2">
+                        <div>
+                          <p className="text-sm font-semibold">{payment.from_user?.name || 'Unknown user'}</p>
+                          <p className="text-xs text-neutral-600">{`Transferred: đ ${formatVndAmount(payment.amount)}`}</p>
+                        </div>
+                        {canManageTreasury ? (
+                          <button
+                            type="button"
+                            className="badge bg-success-50 text-success-700 transition hover:opacity-90 disabled:opacity-50"
+                            onClick={() => handleConfirmPaymentReceived(payment.id)}
+                            disabled={paymentActionId === payment.id}
+                          >
+                            {paymentActionId === payment.id ? '...' : 'Confirm Received'}
+                          </button>
+                        ) : (
+                          <Badge status="warning">Waiting Treasurer</Badge>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              )}
+
+              <Card className="mt-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-neutral-600 uppercase">Treasury Ledger</p>
+                  <Badge status={treasuryNetFund >= 0 ? 'success' : 'error'}>
+                    {treasuryNetFund >= 0 ? 'Healthy' : 'Negative'}
+                  </Badge>
+                </div>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  <div>
+                    <p className="text-xs text-neutral-600">Treasury Received</p>
+                    <p className="font-semibold text-success-700">{`đ ${formatVndAmount(confirmedToTreasuryAmount)}`}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-neutral-600">Treasury Sent</p>
+                    <p className="font-semibold text-error-800">{`đ ${formatVndAmount(confirmedFromTreasuryAmount)}`}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-neutral-600">Treasury Expense</p>
+                    <p className="font-semibold text-error-800">{`đ ${formatVndAmount(treasuryApprovedExpenseTotal)}`}</p>
+                  </div>
+                </div>
+                <div className={`rounded-xl p-3 ${treasuryNetFund >= 0 ? 'bg-success-50' : 'bg-error-50'}`}>
+                  <p className="text-xs text-neutral-600">Treasury Net Balance</p>
+                  <p className={`text-xl font-bold ${treasuryNetFund >= 0 ? 'text-success-700' : 'text-error-800'}`}>
+                    {treasuryNetFund >= 0
+                      ? `đ ${formatVndAmount(treasuryNetFund)}`
+                      : `đ -${formatVndAmount(Math.abs(treasuryNetFund))}`}
+                  </p>
+                </div>
+              </Card>
+
+              {membersNeedingPayout.length > 0 && (
+                <Card className="mt-3 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-neutral-600 uppercase">Members To Reimburse</p>
+                    <Badge status="warning">{membersNeedingPayout.length}</Badge>
+                  </div>
+                  <div className="space-y-2">
+                    {membersNeedingPayout.map((member) => (
+                      <button
+                        key={member.user_id}
+                        type="button"
+                        className="w-full rounded-xl border border-neutral-200 p-3 text-left transition hover:bg-neutral-50"
+                        onClick={() => handleOpenPayoutModal(member)}
+                        disabled={!canManageTreasury}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <p className="text-sm font-semibold">{member.name}</p>
+                            <p className="text-xs text-neutral-600">{`Need payout: đ ${formatVndAmount(member.payoutNeeded)}`}</p>
+                          </div>
+                          <Badge status={member.waitingTransfer ? 'warning' : 'default'}>
+                            {member.waitingTransfer ? 'Waiting Confirm' : 'Transfer'}
+                          </Badge>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </Card>
+              )}
+
+
+            </motion.div>
+            )}
+
+            {activeTab === 'participants' && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+              >
+              <h2 className="text-sm font-semibold text-neutral-600 mb-3 uppercase">
+                Participants ({checkedInCount}/{teamMemberCount})
               </h2>
               <Card className="space-y-2">
                 {participants.length === 0 ? (
@@ -506,13 +924,14 @@ export const EventDetailPage = () => {
                   ))
                 )}
               </Card>
-            </motion.div>
+              </motion.div>
+            )}
 
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
-            >
+            {activeTab === 'expenses' && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+              >
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-semibold text-neutral-600 uppercase">
                   Expenses
@@ -573,7 +992,8 @@ export const EventDetailPage = () => {
                   ))}
                 </div>
               )}
-            </motion.div>
+              </motion.div>
+            )}
           </>
         )}
       </div>
@@ -675,7 +1095,7 @@ export const EventDetailPage = () => {
       <Modal
         isOpen={paymentModalOpen}
         onClose={() => setPaymentModalOpen(false)}
-        title={hasSettlementPayment ? 'Update Payment' : 'Add Payment'}
+        title={paymentModalMode === 'PAY_MEMBER' ? 'Transfer Reimbursement' : 'Transfer Payment'}
         footer={
           <>
             <Button
@@ -685,29 +1105,80 @@ export const EventDetailPage = () => {
             >
               Cancel
             </Button>
-            <Button
-              onClick={handleSavePayment}
-              className="flex-1"
-              disabled={!paymentForm.amount || !isCheckedIn}
-              loading={actionLoading}
-            >
-              Save
-            </Button>
+            {((paymentModalMode === 'PAY_TREASURER' && userPaymentStatus === 'pending' && transferAmount > 0) ||
+              (paymentModalMode === 'PAY_MEMBER' && payoutTransferAmount > 0)) && (
+              <Button
+                onClick={handleSavePayment}
+                className="flex-1"
+                disabled={!isCheckedIn}
+                loading={actionLoading}
+              >
+                I Have Transferred
+              </Button>
+            )}
           </>
         }
       >
         <div className="space-y-4 text-center">
-          <p className="text-sm text-neutral-600">{`Your share is đ ${formatVndAmount(userShare)}`}</p>
-          <Input
-            label="Paid Amount"
-            type="number"
-            value={paymentForm.amount}
-            onChange={(e) => setPaymentForm({ amount: e.target.value })}
-            placeholder="0.00"
-          />
-          <div className="bg-neutral-100 p-8 rounded-xl flex items-center justify-center">
-            <QrCode size={100} className="text-primary-400" />
+          <p className="text-sm text-neutral-600">
+            {paymentModalMode === 'PAY_MEMBER'
+              ? `Transfer to ${paymentTarget?.name || 'Member'}`
+              : `Transfer to ${receiverName}`}
+          </p>
+          {(paymentModalMode === 'PAY_MEMBER' ? paymentTargetInfo : receiverPaymentInfo) ? (
+            <Card className="space-y-3 text-left">
+              <div>
+                <p className="text-xs text-neutral-600">Bank Name</p>
+                <p className="font-semibold">{(paymentModalMode === 'PAY_MEMBER' ? paymentTargetInfo?.bank_name : receiverPaymentInfo?.bank_name) || '-'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-neutral-600">Account Name</p>
+                <p className="font-semibold">
+                  {(paymentModalMode === 'PAY_MEMBER' ? paymentTargetInfo?.account_name : receiverPaymentInfo?.account_name)
+                    || (paymentModalMode === 'PAY_MEMBER' ? paymentTarget?.name : receiverName)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-neutral-600">Account Number</p>
+                <p className="font-mono text-sm font-semibold">
+                  {(paymentModalMode === 'PAY_MEMBER' ? paymentTargetInfo?.account_number : receiverPaymentInfo?.account_number) || '-'}
+                </p>
+              </div>
+            </Card>
+          ) : (
+            <Card className="text-left">
+              <p className="text-xs text-neutral-600">
+                {paymentModalMode === 'PAY_MEMBER'
+                  ? 'Member payment info has not been set yet.'
+                  : 'Treasurer payment info has not been set yet.'}
+              </p>
+            </Card>
+          )}
+
+          <div className="bg-neutral-100 p-4 rounded-xl flex items-center justify-center min-h-40">
+            {(paymentModalMode === 'PAY_MEMBER' ? paymentTargetInfo?.qr_url : receiverPaymentInfo?.qr_url) ? (
+              <img
+                src={paymentModalMode === 'PAY_MEMBER' ? paymentTargetInfo?.qr_url : receiverPaymentInfo?.qr_url}
+                alt="Payment QR"
+                className="max-h-56 rounded-lg"
+              />
+            ) : (
+              <QrCode size={100} className="text-primary-400" />
+            )}
           </div>
+
+          <p className="text-sm text-neutral-600">
+            {`Amount to transfer: đ ${formatVndAmount(paymentModalMode === 'PAY_MEMBER' ? payoutTransferAmount : transferAmount)}`}
+          </p>
+          {paymentModalMode === 'PAY_TREASURER' && userPaymentStatus === 'waiting_confirm' && (
+            <p className="text-sm text-warning-900">Your transfer is waiting for treasurer confirmation.</p>
+          )}
+          {paymentModalMode === 'PAY_TREASURER' && userPaymentStatus === 'complete' && (
+            <p className="text-sm text-success-700">Payment has been confirmed as received.</p>
+          )}
+          {paymentModalMode === 'PAY_MEMBER' && paymentTarget?.waitingTransfer && (
+            <p className="text-sm text-warning-900">This payout is already waiting for member confirmation.</p>
+          )}
         </div>
       </Modal>
 
