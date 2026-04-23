@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Redirecting...</title>
+    <script>
+      ;(function () {
+        var pathname = window.location.pathname || '/'
+        var segments = pathname.split('/').filter(Boolean)
+        var repoBase = segments.length > 0 ? '/' + segments[0] : ''
+        var routePath = pathname.slice(repoBase.length) || '/'
+        var redirectPath = routePath + window.location.search + window.location.hash
+        sessionStorage.setItem('gh-pages-spa-redirect', redirectPath)
+        window.location.replace(window.location.origin + repoBase + '/')
+      })()
+    </script>
+  </head>
+  <body></body>
+</html>

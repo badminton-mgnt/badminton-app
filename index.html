@@ -4,6 +4,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Badminton Attendance & Expense App</title>
+    <script>
+      ;(function () {
+        const redirect = sessionStorage.getItem('gh-pages-spa-redirect')
+        if (!redirect) return
+
+        sessionStorage.removeItem('gh-pages-spa-redirect')
+        const { pathname, search, hash } = window.location
+        window.history.replaceState(null, '', pathname + redirect + search + hash)
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

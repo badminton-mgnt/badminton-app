@@ -18,7 +18,7 @@ import './index.css'
 
 function App() {
   return (
-    <Router>
+    <Router basename={import.meta.env.BASE_URL}>
       <AuthProvider>
         <TeamProvider>
           <div className="bg-neutral-100 min-h-screen font-inter">
