@@ -91,17 +91,23 @@ export const EventDetailPage = () => {
       setEvent(eventData)
       let treasuryUserId = null
       if (eventData?.team_id) {
-        try {
-          const [teamMembersData, teamData] = await Promise.all([
-            getTeamMembers(eventData.team_id),
-            getTeam(eventData.team_id),
-          ])
-          setTeamMemberCount(teamMembersData.length)
-          treasuryUserId = teamData?.treasurer_id || null
-          setTeamTreasurerId(treasuryUserId)
-        } catch (error) {
-          console.error('Error loading team data:', error)
+        const [teamMembersResult, teamResult] = await Promise.allSettled([
+          getTeamMembers(eventData.team_id),
+          getTeam(eventData.team_id),
+        ])
+
+        if (teamMembersResult.status === 'fulfilled') {
+          setTeamMemberCount(teamMembersResult.value.length)
+        } else {
+          console.error('Error loading team members:', teamMembersResult.reason)
           setTeamMemberCount(0)
+        }
+
+        if (teamResult.status === 'fulfilled') {
+          treasuryUserId = teamResult.value?.treasurer_id || null
+          setTeamTreasurerId(treasuryUserId)
+        } else {
+          console.error('Error loading team detail:', teamResult.reason)
           setTeamTreasurerId(null)
         }
       } else {
@@ -222,7 +228,10 @@ export const EventDetailPage = () => {
   const canManageEvent =
     event?.created_by === user?.id || ['admin', 'sub_admin'].includes(currentUserRole)
   const canAutoApproveExpense = ['admin', 'sub_admin'].includes(currentUserRole)
-  const isTeamTreasurer = Boolean(teamTreasurerId) && String(teamTreasurerId) === String(user.id)
+  const isTeamTreasurer =
+    Boolean(teamTreasurerId) &&
+    Boolean(user?.id) &&
+    String(teamTreasurerId).toLowerCase() === String(user.id).toLowerCase()
   const canManageTreasury = isTeamTreasurer
 
   const eventStartAtMs = event?.date ? new Date(event.date).getTime() : Number.NaN
