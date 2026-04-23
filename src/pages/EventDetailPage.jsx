@@ -366,7 +366,7 @@ export const EventDetailPage = () => {
   const handleExpenseStatusChange = async (expenseId, status) => {
     try {
       setExpenseActionId(expenseId)
-      await updateExpenseStatus(expenseId, status)
+      await updateExpenseStatus(expenseId, status, user.id)
       await loadData()
     } catch (error) {
       console.error(`Error updating expense to ${status}:`, error)
@@ -1005,9 +1005,22 @@ export const EventDetailPage = () => {
                       </div>
                       <div className="text-right">
                         <p className="font-bold text-primary-400">{`đ ${formatVndAmount(expense.amount)}`}</p>
-                        <Badge status={expense.status === 'APPROVED' ? 'success' : 'warning'}>
+                        <Badge
+                          status={
+                            expense.status === 'APPROVED'
+                              ? 'success'
+                              : expense.status === 'REJECTED'
+                              ? 'error'
+                              : 'warning'
+                          }
+                        >
                           {expense.status}
                         </Badge>
+                        {expense.status !== 'PENDING' && (
+                          <p className="mt-1 text-xs text-neutral-600">
+                            {`by ${expense.approved_by_user?.name || 'Unknown'} at ${expense.approved_at ? formatBangkokDateTime(expense.approved_at) : '-'}`}
+                          </p>
+                        )}
                         {canAutoApproveExpense && expense.status === 'PENDING' && (
                           <div className="mt-2 flex justify-end gap-2">
                             <button

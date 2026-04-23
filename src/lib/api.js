@@ -50,6 +50,35 @@ const attachTransferUsers = async (rows, fields = 'id, name') => {
   }))
 }
 
+const attachExpenseUsers = async (rows, fields = 'id, name') => {
+  if (!rows?.length) {
+    return []
+  }
+
+  const userIds = [
+    ...new Set(
+      rows
+        .flatMap((row) => [row.user_id, row.approved_by])
+        .filter(Boolean)
+    ),
+  ]
+
+  const { data: users, error } = await supabase
+    .from('users')
+    .select(fields)
+    .in('id', userIds)
+
+  if (error) throw error
+
+  const usersById = new Map((users || []).map((user) => [String(user.id), user]))
+
+  return rows.map((row) => ({
+    ...row,
+    users: usersById.get(String(row.user_id)) || null,
+    approved_by_user: usersById.get(String(row.approved_by)) || null,
+  }))
+}
+
 // Auth functions
 export const signup = async (email, password, name) => {
   const { data, error } = await supabase.auth.signUp({
@@ -495,13 +524,20 @@ export const getEventExpenses = async (eventId) => {
     .eq('event_id', eventId)
 
   if (error) throw error
-  return attachUsersById(expenses, 'id, name')
+  return attachExpenseUsers(expenses, 'id, name')
 }
 
-export const updateExpenseStatus = async (expenseId, status) => {
+export const updateExpenseStatus = async (expenseId, status, approverUserId) => {
+  const nextStatus = String(status || '').toUpperCase()
+  const updatePayload = {
+    status: nextStatus,
+    approved_by: ['APPROVED', 'REJECTED'].includes(nextStatus) ? approverUserId : null,
+    approved_at: ['APPROVED', 'REJECTED'].includes(nextStatus) ? new Date().toISOString() : null,
+  }
+
   const { data, error } = await supabase
     .from('expenses')
-    .update({ status })
+    .update(updatePayload)
     .eq('id', expenseId)
     .select()
 
