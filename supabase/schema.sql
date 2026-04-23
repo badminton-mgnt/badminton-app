@@ -539,14 +539,31 @@ with check (
 -- =====================================================
 
 drop policy if exists "view payment info" on public.payment_info;
+drop policy if exists "view own payment info" on public.payment_info;
 drop policy if exists "insert payment info" on public.payment_info;
 drop policy if exists "update payment info" on public.payment_info;
 
-create policy "view own payment info"
+create policy "view accessible payment info"
 on public.payment_info
 for select
 to authenticated
-using (auth.uid() = user_id);
+using (
+  auth.uid() = user_id
+  or exists (
+    select 1
+    from public.team_members tm_self
+    join public.team_members tm_target
+      on tm_target.team_id = tm_self.team_id
+    where tm_self.user_id = auth.uid()
+      and tm_target.user_id = payment_info.user_id
+  )
+  or exists (
+    select 1
+    from public.users u
+    where u.id = auth.uid()
+      and u.role in ('admin', 'sub_admin')
+  )
+);
 
 create policy "insert own payment info"
 on public.payment_info
