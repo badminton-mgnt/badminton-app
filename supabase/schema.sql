@@ -11,6 +11,7 @@ CREATE TABLE teams (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   name TEXT NOT NULL CHECK (char_length(trim(name)) between 1 and 20),
   created_by UUID REFERENCES users(id) ON DELETE CASCADE,
+  treasurer_id UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMP DEFAULT now()
 );
 
@@ -30,6 +31,14 @@ CREATE TABLE team_members (
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   joined_at TIMESTAMP DEFAULT now(),
   UNIQUE(team_id, user_id)
+);
+
+CREATE TABLE team_invitations (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  email TEXT NOT NULL,
+  created_at TIMESTAMP DEFAULT now(),
+  UNIQUE(team_id, email)
 );
 
 -- Create Events Table
@@ -67,18 +76,6 @@ CREATE TABLE expenses (
   created_at TIMESTAMP DEFAULT now()
 );
 
--- Create Payments Table
-CREATE TABLE payments (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
-  event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  amount NUMERIC(10, 2) NOT NULL,
-  status TEXT DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'CONFIRMED')),
-  created_at TIMESTAMP DEFAULT now(),
-  UNIQUE(event_id, user_id)
-);
-
 -- Create Payment Info Table
 CREATE TABLE payment_info (
   user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -87,6 +84,20 @@ CREATE TABLE payment_info (
   account_name TEXT,
   qr_url TEXT,
   updated_at TIMESTAMP DEFAULT now()
+);
+
+-- Create Payment Transfers Table
+CREATE TABLE payment_transfers (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  from_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  to_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  amount NUMERIC(10, 2) NOT NULL,
+  direction TEXT NOT NULL CHECK (direction IN ('TO_TREASURY', 'FROM_TREASURY')),
+  status TEXT DEFAULT 'WAITING_CONFIRM' CHECK (status IN ('WAITING_CONFIRM', 'CONFIRMED')),
+  confirmed_at TIMESTAMP,
+  created_at TIMESTAMP DEFAULT now()
 );
 
 -- Enable RLS (Row Level Security)
@@ -117,9 +128,10 @@ alter table public.users enable row level security;
 alter table public.teams enable row level security;
 alter table public.team_deletion_logs enable row level security;
 alter table public.team_members enable row level security;
+alter table public.team_invitations enable row level security;
 alter table public.events enable row level security;
 alter table public.expenses enable row level security;
-alter table public.payments enable row level security;
+alter table public.payment_transfers enable row level security;
 alter table public.payment_info enable row level security;
 alter table public.event_participants enable row level security;
 
@@ -131,6 +143,8 @@ alter table public.event_participants enable row level security;
 drop policy if exists "select own profile" on public.users;
 drop policy if exists "select app users" on public.users;
 drop policy if exists "update own profile" on public.users;
+drop policy if exists "admin update profiles" on public.users;
+drop policy if exists "admin delete profiles" on public.users;
 drop policy if exists "insert own profile" on public.users;
 
 create policy "select app users"
@@ -145,6 +159,40 @@ for update
 to authenticated
 using (auth.uid() = id)
 with check (auth.uid() = id);
+
+create policy "admin update profiles"
+on public.users
+for update
+to authenticated
+using (
+  exists (
+    select 1
+    from public.users u
+    where u.id = auth.uid()
+    and u.role = 'admin'
+  )
+)
+with check (
+  exists (
+    select 1
+    from public.users u
+    where u.id = auth.uid()
+    and u.role = 'admin'
+  )
+);
+
+create policy "admin delete profiles"
+on public.users
+for delete
+to authenticated
+using (
+  exists (
+    select 1
+    from public.users u
+    where u.id = auth.uid()
+    and u.role = 'admin'
+  )
+);
 
 create policy "insert own profile"
 on public.users
@@ -185,14 +233,14 @@ using (
   exists (
     select 1 from public.users u
     where u.id = auth.uid()
-    and u.role = 'admin'
+    and u.role in ('admin', 'sub_admin')
   )
 )
 with check (
   exists (
     select 1 from public.users u
     where u.id = auth.uid()
-    and u.role = 'admin'
+    and u.role in ('admin', 'sub_admin')
   )
 );
 
@@ -237,6 +285,7 @@ drop policy if exists "join or add team members" on public.team_members;
 drop policy if exists "leave own team" on public.team_members;
 drop policy if exists "self join team" on public.team_members;
 drop policy if exists "admin manage members" on public.team_members;
+drop policy if exists "admin remove team members" on public.team_members;
 drop policy if exists "view own memberships" on public.team_members;
 
 create policy "view team members"
@@ -262,6 +311,67 @@ for delete
 to authenticated
 using (
   user_id = auth.uid()
+);
+
+create policy "admin remove team members"
+on public.team_members
+for delete
+to authenticated
+using (
+  exists (
+    select 1
+    from public.users u
+    where u.id = auth.uid()
+    and u.role = 'admin'
+  )
+);
+
+
+-- =====================================================
+-- 4B. TEAM INVITATIONS
+-- =====================================================
+
+drop policy if exists "admin view team invitations" on public.team_invitations;
+drop policy if exists "admin create team invitations" on public.team_invitations;
+drop policy if exists "admin delete team invitations" on public.team_invitations;
+
+create policy "admin view team invitations"
+on public.team_invitations
+for select
+to authenticated
+using (
+  exists (
+    select 1
+    from public.users u
+    where u.id = auth.uid()
+    and u.role = 'admin'
+  )
+);
+
+create policy "admin create team invitations"
+on public.team_invitations
+for insert
+to authenticated
+with check (
+  exists (
+    select 1
+    from public.users u
+    where u.id = auth.uid()
+    and u.role = 'admin'
+  )
+);
+
+create policy "admin delete team invitations"
+on public.team_invitations
+for delete
+to authenticated
+using (
+  exists (
+    select 1
+    from public.users u
+    where u.id = auth.uid()
+    and u.role = 'admin'
+  )
 );
 
 
@@ -380,52 +490,52 @@ using (
 
 
 -- =====================================================
--- 7. PAYMENTS
+-- 8. PAYMENT TRANSFERS
 -- =====================================================
 
-drop policy if exists "view payments" on public.payments;
-drop policy if exists "create payment" on public.payments;
-drop policy if exists "update own payment" on public.payments;
+drop policy if exists "view payment transfers" on public.payment_transfers;
+drop policy if exists "create payment transfers" on public.payment_transfers;
+drop policy if exists "confirm incoming transfer" on public.payment_transfers;
 
-create policy "view payments"
-on public.payments
+create policy "view payment transfers"
+on public.payment_transfers
 for select
 to authenticated
 using (
   exists (
     select 1 from public.team_members tm
-    where tm.team_id = payments.team_id
+    where tm.team_id = payment_transfers.team_id
     and tm.user_id = auth.uid()
   )
 );
 
-create policy "create payment"
-on public.payments
+create policy "create payment transfers"
+on public.payment_transfers
 for insert
 to authenticated
 with check (
-  user_id = auth.uid()
+  from_user_id = auth.uid()
   and exists (
     select 1 from public.team_members tm
-    where tm.team_id = payments.team_id
+    where tm.team_id = payment_transfers.team_id
     and tm.user_id = auth.uid()
   )
 );
 
-create policy "update own payment"
-on public.payments
+create policy "confirm incoming transfer"
+on public.payment_transfers
 for update
 to authenticated
 using (
-  user_id = auth.uid()
+  to_user_id = auth.uid()
 )
 with check (
-  user_id = auth.uid()
+  to_user_id = auth.uid()
 );
 
 
 -- =====================================================
--- 8. PAYMENT INFO (FIX YOUR ERROR HERE)
+-- 9. PAYMENT INFO (FIX YOUR ERROR HERE)
 -- =====================================================
 
 drop policy if exists "view payment info" on public.payment_info;
@@ -453,7 +563,7 @@ with check (auth.uid() = user_id);
 
 
 -- =====================================================
--- 9. EVENT PARTICIPANTS
+-- 10. EVENT PARTICIPANTS
 -- =====================================================
 
 drop policy if exists "view participants" on public.event_participants;

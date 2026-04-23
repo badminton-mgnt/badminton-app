@@ -21,6 +21,35 @@ const attachUsersById = async (rows, fields = 'id, name') => {
   }))
 }
 
+const attachTransferUsers = async (rows, fields = 'id, name') => {
+  if (!rows?.length) {
+    return []
+  }
+
+  const userIds = [
+    ...new Set(
+      rows
+        .flatMap((row) => [row.from_user_id, row.to_user_id])
+        .filter(Boolean)
+    ),
+  ]
+
+  const { data: users, error } = await supabase
+    .from('users')
+    .select(fields)
+    .in('id', userIds)
+
+  if (error) throw error
+
+  const usersById = new Map((users || []).map((user) => [String(user.id), user]))
+
+  return rows.map((row) => ({
+    ...row,
+    from_user: usersById.get(String(row.from_user_id)) || null,
+    to_user: usersById.get(String(row.to_user_id)) || null,
+  }))
+}
+
 // Auth functions
 export const signup = async (email, password, name) => {
   const { data, error } = await supabase.auth.signUp({
@@ -32,13 +61,6 @@ export const signup = async (email, password, name) => {
   })
 
   if (error) throw error
-
-  // Create user profile
-  const { error: profileError } = await supabase
-    .from('users')
-    .insert([{ id: data.user.id, name }])
-
-  if (profileError) throw profileError
 
   return data
 }
@@ -53,8 +75,99 @@ export const login = async (email, password) => {
   return data
 }
 
+export const deleteUserProfile = async (userId) => {
+  const { error } = await supabase
+    .from('users')
+    .delete()
+    .eq('id', userId)
+
+  if (error) throw error
+}
+
+export const updateUserRole = async (userId, role) => {
+  const { data, error } = await supabase
+    .from('users')
+    .update({ role })
+    .eq('id', userId)
+    .select('id, name, role')
+    .single()
+
+  if (error) throw error
+  return data
+}
+
 export const logout = async () => {
   const { error } = await supabase.auth.signOut()
+  if (error) throw error
+}
+
+export const removeTeamMember = async (teamId, userId) => {
+  const { error } = await supabase
+    .from('team_members')
+    .delete()
+    .eq('team_id', teamId)
+    .eq('user_id', userId)
+
+  if (error) throw error
+}
+
+export const updateTeamTreasurer = async (teamId, treasurerId) => {
+  const { data: currentTeam, error: currentTeamError } = await supabase
+    .from('teams')
+    .select('id, treasurer_id')
+    .eq('id', teamId)
+    .single()
+
+  if (currentTeamError) throw currentTeamError
+
+  if (
+    currentTeam?.treasurer_id &&
+    treasurerId &&
+    String(currentTeam.treasurer_id) !== String(treasurerId)
+  ) {
+    throw new Error('This team already has a treasurer. Please clear current treasurer first before assigning another one.')
+  }
+
+  const { data, error } = await supabase
+    .from('teams')
+    .update({ treasurer_id: treasurerId || null })
+    .eq('id', teamId)
+    .select('id, name, created_by, treasurer_id, created_at')
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export const getTeamInvitations = async (teamId) => {
+  const { data, error } = await supabase
+    .from('team_invitations')
+    .select('id, team_id, email, created_at')
+    .eq('team_id', teamId)
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return data
+}
+
+export const createTeamInvitation = async (teamId, email) => {
+  const normalizedEmail = email.trim().toLowerCase()
+  const { data, error } = await supabase
+    .from('team_invitations')
+    .upsert([{ team_id: teamId, email: normalizedEmail }], { onConflict: 'team_id,email' })
+    .select('id, team_id, email, created_at')
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export const deleteTeamInvitation = async (invitationId) => {
+  const { error } = await supabase
+    .from('team_invitations')
+    .delete()
+    .eq('id', invitationId)
+
   if (error) throw error
 }
 
@@ -146,7 +259,7 @@ export const createTeam = async (name, userId) => {
 export const getTeams = async (userId) => {
   const { data, error } = await supabase
     .from('team_members')
-    .select('id, team_id, joined_at, teams(id, name, created_by, created_at)')
+    .select('id, team_id, joined_at, teams(id, name, created_by, treasurer_id, created_at)')
     .eq('user_id', userId)
 
   if (error) throw error
@@ -156,7 +269,7 @@ export const getTeams = async (userId) => {
 export const getAllTeams = async () => {
   const { data, error } = await supabase
     .from('teams')
-    .select('id, name, created_by, created_at')
+    .select('id, name, created_by, treasurer_id, created_at')
     .order('created_at', { ascending: false })
 
   if (error) throw error
@@ -166,7 +279,7 @@ export const getAllTeams = async () => {
 export const getTeam = async (teamId) => {
   const { data, error } = await supabase
     .from('teams')
-    .select('id, name, created_by, created_at')
+    .select('id, name, created_by, treasurer_id, created_at')
     .eq('id', teamId)
     .single()
 
@@ -396,57 +509,39 @@ export const updateExpenseStatus = async (expenseId, status) => {
   return data[0]
 }
 
-// Payment functions
-export const createPayment = async (payment) => {
-  const { data, error } = await supabase
-    .from('payments')
-    .upsert([payment], { onConflict: 'event_id,user_id' })
-    .select()
-
-  if (error) throw error
-  return data[0]
-}
-
-export const getEventPayments = async (eventId) => {
-  const { data: payments, error } = await supabase
-    .from('payments')
+export const getEventPaymentTransfers = async (eventId) => {
+  const { data: transfers, error } = await supabase
+    .from('payment_transfers')
     .select('*')
     .eq('event_id', eventId)
+    .order('created_at', { ascending: false })
 
   if (error) throw error
-  return attachUsersById(payments, 'id, name')
+  return attachTransferUsers(transfers, 'id, name')
 }
 
-export const updatePaymentStatus = async (paymentId, status) => {
+export const createPaymentTransfer = async (transfer) => {
   const { data, error } = await supabase
-    .from('payments')
-    .update({ status })
-    .eq('id', paymentId)
+    .from('payment_transfers')
+    .insert([transfer])
     .select()
 
   if (error) throw error
   return data[0]
 }
 
-export const savePayment = async (payment) => {
+export const confirmPaymentTransfer = async (transferId) => {
   const { data, error } = await supabase
-    .from('payments')
-    .upsert([payment], { onConflict: 'event_id,user_id' })
+    .from('payment_transfers')
+    .update({ status: 'CONFIRMED', confirmed_at: new Date().toISOString() })
+    .eq('id', transferId)
     .select()
 
   if (error) throw error
+  if (!data?.length) {
+    throw new Error('Unable to confirm transfer. This action may be blocked by database permissions.')
+  }
   return data[0]
-}
-
-export const getUserPayments = async (userId, eventId) => {
-  const { data, error } = await supabase
-    .from('payments')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('event_id', eventId)
-
-  if (error) throw error
-  return data
 }
 
 // Payment Info functions
