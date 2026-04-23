@@ -50,6 +50,8 @@ export const EventDetailPage = () => {
   const [paymentModalMode, setPaymentModalMode] = useState('PAY_TREASURER')
   const [paymentTarget, setPaymentTarget] = useState(null)
   const [paymentTargetInfo, setPaymentTargetInfo] = useState(null)
+  const [loadingReceiverInfo, setLoadingReceiverInfo] = useState(false)
+  const [receiverPaymentInfoError, setReceiverPaymentInfoError] = useState('')
   const [activeTab, setActiveTab] = useState('settlement')
   const [eventForm, setEventForm] = useState({
     title: '',
@@ -130,6 +132,7 @@ export const EventDetailPage = () => {
       }
 
       if (treasuryUserId) {
+        setReceiverPaymentInfoError('')
         const [receiverProfileResult, receiverPaymentInfoResult] = await Promise.allSettled([
           getUserProfile(treasuryUserId),
           getPaymentInfo(treasuryUserId),
@@ -145,10 +148,12 @@ export const EventDetailPage = () => {
           setReceiverPaymentInfo(receiverPaymentInfoResult.value)
         } else {
           setReceiverPaymentInfo(null)
+          setReceiverPaymentInfoError(receiverPaymentInfoResult.reason?.message || 'Unable to load treasurer payment info.')
         }
       } else {
         setReceiverName('Treasurer not set')
         setReceiverPaymentInfo(null)
+        setReceiverPaymentInfoError('')
       }
 
       setEventForm({
@@ -169,6 +174,33 @@ export const EventDetailPage = () => {
     setPaymentModalMode('PAY_TREASURER')
     setPaymentTarget(null)
     setPaymentTargetInfo(null)
+    setReceiverPaymentInfoError('')
+    if (teamTreasurerId) {
+      try {
+        setLoadingReceiverInfo(true)
+        const [receiverProfileResult, receiverPaymentInfoResult] = await Promise.allSettled([
+          getUserProfile(teamTreasurerId),
+          getPaymentInfo(teamTreasurerId),
+        ])
+
+        if (receiverProfileResult.status === 'fulfilled') {
+          setReceiverName(receiverProfileResult.value?.name || 'Treasurer')
+        }
+
+        if (receiverPaymentInfoResult.status === 'fulfilled') {
+          setReceiverPaymentInfo(receiverPaymentInfoResult.value)
+        } else {
+          setReceiverPaymentInfo(null)
+          setReceiverPaymentInfoError(receiverPaymentInfoResult.reason?.message || 'Unable to load treasurer payment info.')
+        }
+      } catch (error) {
+        console.error('Error loading treasurer payment info:', error)
+        setReceiverPaymentInfo(null)
+        setReceiverPaymentInfoError(error.message || 'Unable to load treasurer payment info.')
+      } finally {
+        setLoadingReceiverInfo(false)
+      }
+    }
     setPaymentModalOpen(true)
   }
 
@@ -1125,7 +1157,11 @@ export const EventDetailPage = () => {
               ? `Transfer to ${paymentTarget?.name || 'Member'}`
               : `Transfer to ${receiverName}`}
           </p>
-          {(paymentModalMode === 'PAY_MEMBER' ? paymentTargetInfo : receiverPaymentInfo) ? (
+          {paymentModalMode === 'PAY_TREASURER' && loadingReceiverInfo ? (
+            <Card className="text-left">
+              <p className="text-xs text-neutral-600">Loading treasurer payment info...</p>
+            </Card>
+          ) : (paymentModalMode === 'PAY_MEMBER' ? paymentTargetInfo : receiverPaymentInfo) ? (
             <Card className="space-y-3 text-left">
               <div>
                 <p className="text-xs text-neutral-600">Bank Name</p>
@@ -1150,7 +1186,7 @@ export const EventDetailPage = () => {
               <p className="text-xs text-neutral-600">
                 {paymentModalMode === 'PAY_MEMBER'
                   ? 'Member payment info has not been set yet.'
-                  : 'Treasurer payment info has not been set yet.'}
+                  : (receiverPaymentInfoError || 'Treasurer payment info has not been set yet.')}
               </p>
             </Card>
           )}

@@ -14,6 +14,7 @@ export const ProfilePage = () => {
   const [paymentInfo, setPaymentInfoState] = useState(null)
   const [loading, setLoading] = useState(true)
   const [paymentModalOpen, setPaymentModalOpen] = useState(false)
+  const [qrUploadError, setQrUploadError] = useState('')
   const [paymentForm, setPaymentForm] = useState({
     bank_name: '',
     account_number: '',
@@ -61,6 +62,29 @@ export const ProfilePage = () => {
     } catch (error) {
       console.error('Error saving payment info:', error)
     }
+  }
+
+  const handleQrImageChange = (event) => {
+    const file = event.target.files?.[0]
+    setQrUploadError('')
+
+    if (!file) {
+      return
+    }
+
+    if (!file.type.startsWith('image/')) {
+      setQrUploadError('Please select an image file.')
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      setPaymentForm((prev) => ({ ...prev, qr_url: String(reader.result || '') }))
+    }
+    reader.onerror = () => {
+      setQrUploadError('Unable to read this image. Please try another file.')
+    }
+    reader.readAsDataURL(file)
   }
 
   const handleLogout = async () => {
@@ -152,6 +176,16 @@ export const ProfilePage = () => {
                 <p className="text-xs text-neutral-600">Account Number</p>
                 <p className="font-mono text-sm font-semibold">{paymentInfo.account_number}</p>
               </div>
+              {paymentInfo.qr_url && (
+                <div>
+                  <p className="text-xs text-neutral-600 mb-2">QR Code</p>
+                  <img
+                    src={paymentInfo.qr_url}
+                    alt="Payment QR"
+                    className="w-full max-w-56 rounded-lg border border-neutral-200"
+                  />
+                </div>
+              )}
             </Card>
           ) : (
             <Card className="text-center py-8">
@@ -240,12 +274,27 @@ export const ProfilePage = () => {
             onChange={(e) => setPaymentForm(prev => ({ ...prev, account_number: e.target.value }))}
             placeholder="1234567890"
           />
-          <Input
-            label="QR Code URL"
-            value={paymentForm.qr_url}
-            onChange={(e) => setPaymentForm(prev => ({ ...prev, qr_url: e.target.value }))}
-            placeholder="https://..."
-          />
+          <div>
+            <label className="block text-sm font-medium text-neutral-700 mb-2">
+              Attach QR Image
+            </label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleQrImageChange}
+              className="input-field"
+            />
+            {qrUploadError && (
+              <p className="text-xs text-error-800 mt-1">{qrUploadError}</p>
+            )}
+            {paymentForm.qr_url && (
+              <img
+                src={paymentForm.qr_url}
+                alt="QR preview"
+                className="mt-3 w-full max-w-56 rounded-lg border border-neutral-200"
+              />
+            )}
+          </div>
         </div>
       </Modal>
 
