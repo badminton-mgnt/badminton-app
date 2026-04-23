@@ -227,11 +227,11 @@ export const EventDetailPage = () => {
 
   const canManageEvent =
     event?.created_by === user?.id || ['admin', 'sub_admin'].includes(currentUserRole)
-  const canAutoApproveExpense = ['admin', 'sub_admin'].includes(currentUserRole)
   const isTeamTreasurer =
     Boolean(teamTreasurerId) &&
     Boolean(user?.id) &&
     String(teamTreasurerId).toLowerCase() === String(user.id).toLowerCase()
+  const canAutoApproveExpense = ['admin', 'sub_admin'].includes(currentUserRole) || isTeamTreasurer
   const canManageTreasury = isTeamTreasurer
 
   const eventStartAtMs = event?.date ? new Date(event.date).getTime() : Number.NaN
