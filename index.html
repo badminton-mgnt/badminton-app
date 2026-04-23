@@ -10,8 +10,10 @@
         if (!redirect) return
 
         sessionStorage.removeItem('gh-pages-spa-redirect')
-        const { pathname, search, hash } = window.location
-        window.history.replaceState(null, '', pathname + redirect + search + hash)
+        const base = '%BASE_URL%'.replace(/\/+$/, '')
+        const normalizedRedirect = redirect.startsWith('/') ? redirect : `/${redirect}`
+        const restoredPath = `${base}${normalizedRedirect}`.replace(/\/{2,}/g, '/')
+        window.history.replaceState(null, '', restoredPath)
       })()
     </script>
   </head>
