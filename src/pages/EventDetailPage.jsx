@@ -366,7 +366,7 @@ export const EventDetailPage = () => {
   const handleExpenseStatusChange = async (expenseId, status) => {
     try {
       setExpenseActionId(expenseId)
-      await updateExpenseStatus(expenseId, status)
+      await updateExpenseStatus(expenseId, status, user.id)
       await loadData()
     } catch (error) {
       console.error(`Error updating expense to ${status}:`, error)
@@ -1008,6 +1008,11 @@ export const EventDetailPage = () => {
                         <Badge status={expense.status === 'APPROVED' ? 'success' : 'warning'}>
                           {expense.status}
                         </Badge>
+                        {expense.status !== 'PENDING' && (
+                          <p className="mt-1 text-xs text-neutral-600">
+                            {`${expense.status === 'APPROVED' ? 'Approved' : 'Rejected'} by ${expense.approved_by_user?.name || 'Unknown'}`}
+                          </p>
+                        )}
                         {canAutoApproveExpense && expense.status === 'PENDING' && (
                           <div className="mt-2 flex justify-end gap-2">
                             <button

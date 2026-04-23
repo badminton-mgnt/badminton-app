@@ -73,6 +73,8 @@ CREATE TABLE expenses (
   amount NUMERIC(10, 2) NOT NULL,
   description TEXT,
   status TEXT DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED')),
+  approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  approved_at TIMESTAMP,
   created_at TIMESTAMP DEFAULT now()
 );
 
@@ -708,6 +710,12 @@ drop constraint if exists event_participants_event_id_user_id_key;
 alter table public.event_participants
 add constraint event_participants_event_id_user_id_key
 unique (event_id, user_id);
+
+alter table public.expenses
+add column if not exists approved_by uuid references public.users(id) on delete set null;
+
+alter table public.expenses
+add column if not exists approved_at timestamp;
 
 alter table public.payments
 drop constraint if exists payments_event_id_user_id_key;
