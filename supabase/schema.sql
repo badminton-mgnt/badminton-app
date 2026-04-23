@@ -486,6 +486,12 @@ using (
     where u.id = auth.uid()
     and u.role in ('admin', 'sub_admin')
   )
+  or exists (
+    select 1
+    from public.teams t
+    where t.id = expenses.team_id
+      and t.treasurer_id = auth.uid()
+  )
 );
 
 
