@@ -1,0 +1,611 @@
+-- Create Users Table
+CREATE TABLE users (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'sub_admin', 'admin')),
+  created_at TIMESTAMP DEFAULT now()
+);
+
+-- Create Teams Table
+CREATE TABLE teams (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  name TEXT NOT NULL CHECK (char_length(trim(name)) between 1 and 20),
+  created_by UUID REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMP DEFAULT now()
+);
+
+CREATE TABLE team_deletion_logs (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  team_id UUID,
+  team_name TEXT NOT NULL,
+  deleted_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  reason TEXT NOT NULL CHECK (char_length(trim(reason)) > 0),
+  deleted_at TIMESTAMP DEFAULT now()
+);
+
+-- Create Team Members Table
+CREATE TABLE team_members (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  joined_at TIMESTAMP DEFAULT now(),
+  UNIQUE(team_id, user_id)
+);
+
+-- Create Events Table
+CREATE TABLE events (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  date TIMESTAMP NOT NULL,
+  location TEXT,
+  court_number INTEGER,
+  status TEXT DEFAULT 'UPCOMING' CHECK (status IN ('UPCOMING', 'ONGOING', 'COMPLETED', 'FINALIZED', 'CANCELLED')),
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMP DEFAULT now()
+);
+
+-- Create Event Participants Table
+CREATE TABLE event_participants (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  checked_in BOOLEAN DEFAULT false,
+  checked_in_at TIMESTAMP,
+  UNIQUE(event_id, user_id)
+);
+
+-- Create Expenses Table
+CREATE TABLE expenses (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  amount NUMERIC(10, 2) NOT NULL,
+  description TEXT,
+  status TEXT DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED')),
+  created_at TIMESTAMP DEFAULT now()
+);
+
+-- Create Payments Table
+CREATE TABLE payments (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  amount NUMERIC(10, 2) NOT NULL,
+  status TEXT DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'CONFIRMED')),
+  created_at TIMESTAMP DEFAULT now(),
+  UNIQUE(event_id, user_id)
+);
+
+-- Create Payment Info Table
+CREATE TABLE payment_info (
+  user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  bank_name TEXT,
+  account_number TEXT,
+  account_name TEXT,
+  qr_url TEXT,
+  updated_at TIMESTAMP DEFAULT now()
+);
+
+-- Enable RLS (Row Level Security)
+
+-- =====================================================
+-- 0. WIPE ALL POLICIES (SAFE RESET)
+-- =====================================================
+
+DO $$
+DECLARE r RECORD;
+BEGIN
+  FOR r IN (
+    SELECT schemaname, tablename, policyname
+    FROM pg_policies
+    WHERE schemaname = 'public'
+  )
+  LOOP
+    EXECUTE format('DROP POLICY IF EXISTS %I ON %I.%I',
+      r.policyname, r.schemaname, r.tablename);
+  END LOOP;
+END $$;
+
+-- =====================================================
+-- 1. ENABLE RLS ALL TABLES
+-- =====================================================
+
+alter table public.users enable row level security;
+alter table public.teams enable row level security;
+alter table public.team_deletion_logs enable row level security;
+alter table public.team_members enable row level security;
+alter table public.events enable row level security;
+alter table public.expenses enable row level security;
+alter table public.payments enable row level security;
+alter table public.payment_info enable row level security;
+alter table public.event_participants enable row level security;
+
+
+-- =====================================================
+-- 2. USERS (AUTH PROFILE)
+-- =====================================================
+
+drop policy if exists "select own profile" on public.users;
+drop policy if exists "select app users" on public.users;
+drop policy if exists "update own profile" on public.users;
+drop policy if exists "insert own profile" on public.users;
+
+create policy "select app users"
+on public.users
+for select
+to authenticated
+using (true);
+
+create policy "update own profile"
+on public.users
+for update
+to authenticated
+using (auth.uid() = id)
+with check (auth.uid() = id);
+
+create policy "insert own profile"
+on public.users
+for insert
+to authenticated
+with check (auth.uid() = id);
+
+
+-- =====================================================
+-- 3. TEAMS (FIX CREATED_BY AUTO + NO ISSUES)
+-- =====================================================
+
+alter table public.teams
+alter column created_by set default auth.uid();
+
+drop policy if exists "create team" on public.teams;
+drop policy if exists "view teams" on public.teams;
+drop policy if exists "update team as admin" on public.teams;
+drop policy if exists "delete team as admin" on public.teams;
+
+create policy "create team"
+on public.teams
+for insert
+to authenticated
+with check (created_by = auth.uid());
+
+create policy "view teams"
+on public.teams
+for select
+to authenticated
+using (true);
+
+create policy "update team as admin"
+on public.teams
+for update
+to authenticated
+using (
+  exists (
+    select 1 from public.users u
+    where u.id = auth.uid()
+    and u.role = 'admin'
+  )
+)
+with check (
+  exists (
+    select 1 from public.users u
+    where u.id = auth.uid()
+    and u.role = 'admin'
+  )
+);
+
+create policy "delete team as admin"
+on public.teams
+for delete
+to authenticated
+using (
+  exists (
+    select 1 from public.users u
+    where u.id = auth.uid()
+    and u.role = 'admin'
+  )
+);
+
+
+-- =====================================================
+-- 3B. TEAM DELETION LOGS
+-- =====================================================
+
+drop policy if exists "admin view team deletion logs" on public.team_deletion_logs;
+
+create policy "admin view team deletion logs"
+on public.team_deletion_logs
+for select
+to authenticated
+using (
+  exists (
+    select 1 from public.users u
+    where u.id = auth.uid()
+    and u.role = 'admin'
+  )
+);
+
+
+-- =====================================================
+-- 4. TEAM MEMBERS (NO RECURSION SAFE VERSION)
+-- =====================================================
+
+drop policy if exists "view team members" on public.team_members;
+drop policy if exists "join or add team members" on public.team_members;
+drop policy if exists "leave own team" on public.team_members;
+drop policy if exists "self join team" on public.team_members;
+drop policy if exists "admin manage members" on public.team_members;
+drop policy if exists "view own memberships" on public.team_members;
+
+create policy "view team members"
+on public.team_members
+for select
+to authenticated
+using (true);
+
+create policy "join or add team members"
+on public.team_members
+for insert
+to authenticated
+with check (
+  exists (
+    select 1 from public.teams t
+    where t.id = team_members.team_id
+  )
+);
+
+create policy "leave own team"
+on public.team_members
+for delete
+to authenticated
+using (
+  user_id = auth.uid()
+);
+
+
+-- =====================================================
+-- 5. EVENTS
+-- =====================================================
+
+drop policy if exists "view team events" on public.events;
+drop policy if exists "create event" on public.events;
+drop policy if exists "update event" on public.events;
+drop policy if exists "delete event manager" on public.events;
+
+create policy "view team events"
+on public.events
+for select
+to authenticated
+using (
+  exists (
+    select 1 from public.team_members tm
+    where tm.team_id = events.team_id
+    and tm.user_id = auth.uid()
+  )
+);
+
+create policy "create event admin"
+on public.events
+for insert
+to authenticated
+with check (
+  exists (
+    select 1 from public.users u
+    where u.id = auth.uid()
+    and u.role in ('admin', 'sub_admin')
+  )
+);
+
+create policy "update event admin"
+on public.events
+for update
+to authenticated
+using (
+  created_by = auth.uid()
+  or exists (
+    select 1 from public.users u
+    where u.id = auth.uid()
+    and u.role in ('admin', 'sub_admin')
+  )
+)
+with check (
+  created_by = auth.uid()
+  or exists (
+    select 1 from public.users u
+    where u.id = auth.uid()
+    and u.role in ('admin', 'sub_admin')
+  )
+);
+
+create policy "delete event manager"
+on public.events
+for delete
+to authenticated
+using (
+  created_by = auth.uid()
+  or exists (
+    select 1 from public.users u
+    where u.id = auth.uid()
+    and u.role in ('admin', 'sub_admin')
+  )
+);
+
+
+-- =====================================================
+-- 6. EXPENSES
+-- =====================================================
+
+drop policy if exists "view expenses" on public.expenses;
+drop policy if exists "add expense" on public.expenses;
+drop policy if exists "approve expense" on public.expenses;
+
+create policy "view expenses"
+on public.expenses
+for select
+to authenticated
+using (
+  exists (
+    select 1 from public.team_members tm
+    where tm.team_id = expenses.team_id
+    and tm.user_id = auth.uid()
+  )
+);
+
+create policy "add expense"
+on public.expenses
+for insert
+to authenticated
+with check (
+  user_id = auth.uid()
+  and exists (
+    select 1 from public.team_members tm
+    where tm.team_id = expenses.team_id
+    and tm.user_id = auth.uid()
+  )
+);
+
+create policy "approve expense"
+on public.expenses
+for update
+to authenticated
+using (
+  exists (
+    select 1 from public.users u
+    where u.id = auth.uid()
+    and u.role in ('admin', 'sub_admin')
+  )
+);
+
+
+-- =====================================================
+-- 7. PAYMENTS
+-- =====================================================
+
+drop policy if exists "view payments" on public.payments;
+drop policy if exists "create payment" on public.payments;
+drop policy if exists "update own payment" on public.payments;
+
+create policy "view payments"
+on public.payments
+for select
+to authenticated
+using (
+  exists (
+    select 1 from public.team_members tm
+    where tm.team_id = payments.team_id
+    and tm.user_id = auth.uid()
+  )
+);
+
+create policy "create payment"
+on public.payments
+for insert
+to authenticated
+with check (
+  user_id = auth.uid()
+  and exists (
+    select 1 from public.team_members tm
+    where tm.team_id = payments.team_id
+    and tm.user_id = auth.uid()
+  )
+);
+
+create policy "update own payment"
+on public.payments
+for update
+to authenticated
+using (
+  user_id = auth.uid()
+)
+with check (
+  user_id = auth.uid()
+);
+
+
+-- =====================================================
+-- 8. PAYMENT INFO (FIX YOUR ERROR HERE)
+-- =====================================================
+
+drop policy if exists "view payment info" on public.payment_info;
+drop policy if exists "insert payment info" on public.payment_info;
+drop policy if exists "update payment info" on public.payment_info;
+
+create policy "view own payment info"
+on public.payment_info
+for select
+to authenticated
+using (auth.uid() = user_id);
+
+create policy "insert own payment info"
+on public.payment_info
+for insert
+to authenticated
+with check (auth.uid() = user_id);
+
+create policy "update own payment info"
+on public.payment_info
+for update
+to authenticated
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+
+-- =====================================================
+-- 9. EVENT PARTICIPANTS
+-- =====================================================
+
+drop policy if exists "view participants" on public.event_participants;
+drop policy if exists "self check-in" on public.event_participants;
+drop policy if exists "update own check-in" on public.event_participants;
+
+create policy "view participants"
+on public.event_participants
+for select
+to authenticated
+using (
+  exists (
+    select 1
+    from public.events e
+    join public.team_members tm on tm.team_id = e.team_id
+    where e.id = event_participants.event_id
+    and tm.user_id = auth.uid()
+  )
+);
+
+create policy "self check-in"
+on public.event_participants
+for insert
+to authenticated
+with check (user_id = auth.uid());
+
+create policy "update own check-in"
+on public.event_participants
+for update
+to authenticated
+using (user_id = auth.uid())
+with check (user_id = auth.uid());
+
+
+-- =====================================================
+-- 10. TEAM DELETE RPC
+-- =====================================================
+
+create or replace function public.delete_team_with_reason(
+  p_team_id uuid,
+  p_reason text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id uuid;
+  v_team_name text;
+begin
+  v_user_id := auth.uid();
+
+  if v_user_id is null then
+    raise exception 'Authentication required';
+  end if;
+
+  if coalesce(trim(p_reason), '') = '' then
+    raise exception 'Delete reason is required';
+  end if;
+
+  if not exists (
+    select 1
+    from public.users u
+    where u.id = v_user_id
+    and u.role = 'admin'
+  ) then
+    raise exception 'Only admin users can delete teams';
+  end if;
+
+  select t.name
+  into v_team_name
+  from public.teams t
+  where t.id = p_team_id;
+
+  if v_team_name is null then
+    raise exception 'Team not found';
+  end if;
+
+  insert into public.team_deletion_logs (team_id, team_name, deleted_by, reason)
+  values (p_team_id, v_team_name, v_user_id, trim(p_reason));
+
+  delete from public.teams
+  where id = p_team_id;
+end;
+$$;
+
+grant execute on function public.delete_team_with_reason(uuid, text) to authenticated;
+
+
+-- =====================================================
+-- 11. CRITICAL FIX (MANDATORY)
+-- =====================================================
+
+alter table public.users
+add column if not exists role text not null default 'user'
+check (role in ('user', 'sub_admin', 'admin'));
+
+alter table public.team_members
+drop column if exists role;
+
+alter table public.teams
+alter column created_by set default auth.uid();
+
+alter table public.payment_info
+alter column user_id set default auth.uid();
+
+alter table public.event_participants
+add column if not exists checked_in_at timestamp;
+
+update public.event_participants
+set checked_in_at = now()
+where checked_in = true
+  and checked_in_at is null;
+
+alter table public.event_participants
+drop constraint if exists event_participants_event_id_user_id_key;
+
+alter table public.event_participants
+add constraint event_participants_event_id_user_id_key
+unique (event_id, user_id);
+
+alter table public.payments
+drop constraint if exists payments_event_id_user_id_key;
+
+alter table public.payments
+add constraint payments_event_id_user_id_key
+unique (event_id, user_id);
+
+alter table public.teams
+drop constraint if exists teams_name_check;
+
+alter table public.teams
+add constraint teams_name_check
+check (char_length(trim(name)) between 1 and 20);
+
+alter table public.events
+drop constraint if exists events_status_check;
+
+alter table public.events
+add constraint events_status_check
+check (status in ('UPCOMING', 'ONGOING', 'COMPLETED', 'FINALIZED', 'CANCELLED'));
+
+-- Create Indexes for better performance
+CREATE INDEX idx_team_members_user_id ON team_members(user_id);
+CREATE INDEX idx_team_members_team_id ON team_members(team_id);
+CREATE INDEX idx_team_deletion_logs_team_id ON team_deletion_logs(team_id);
+CREATE INDEX idx_team_deletion_logs_deleted_by ON team_deletion_logs(deleted_by);
+CREATE INDEX idx_events_team_id ON events(team_id);
+CREATE INDEX idx_expenses_event_id ON expenses(event_id);
+CREATE INDEX idx_expenses_user_id ON expenses(user_id);
+CREATE INDEX idx_payments_event_id ON payments(event_id);
+CREATE INDEX idx_payments_user_id ON payments(user_id);
+CREATE INDEX idx_event_participants_event_id ON event_participants(event_id);
+CREATE INDEX idx_event_participants_user_id ON event_participants(user_id);
