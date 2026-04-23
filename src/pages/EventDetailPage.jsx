@@ -1005,12 +1005,20 @@ export const EventDetailPage = () => {
                       </div>
                       <div className="text-right">
                         <p className="font-bold text-primary-400">{`đ ${formatVndAmount(expense.amount)}`}</p>
-                        <Badge status={expense.status === 'APPROVED' ? 'success' : 'warning'}>
+                        <Badge
+                          status={
+                            expense.status === 'APPROVED'
+                              ? 'success'
+                              : expense.status === 'REJECTED'
+                              ? 'error'
+                              : 'warning'
+                          }
+                        >
                           {expense.status}
                         </Badge>
                         {expense.status !== 'PENDING' && (
                           <p className="mt-1 text-xs text-neutral-600">
-                            {`${expense.status === 'APPROVED' ? 'Approved' : 'Rejected'} by ${expense.approved_by_user?.name || 'Unknown'}`}
+                            {`by ${expense.approved_by_user?.name || 'Unknown'} at ${expense.approved_at ? formatBangkokDateTime(expense.approved_at) : '-'}`}
                           </p>
                         )}
                         {canAutoApproveExpense && expense.status === 'PENDING' && (

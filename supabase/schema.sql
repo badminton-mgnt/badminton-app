@@ -717,6 +717,30 @@ add column if not exists approved_by uuid references public.users(id) on delete 
 alter table public.expenses
 add column if not exists approved_at timestamp;
 
+create or replace function public.set_expense_approval_meta()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.status in ('APPROVED', 'REJECTED') then
+    new.approved_by := coalesce(new.approved_by, auth.uid());
+    new.approved_at := coalesce(new.approved_at, now());
+  else
+    new.approved_by := null;
+    new.approved_at := null;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_set_expense_approval_meta on public.expenses;
+
+create trigger trg_set_expense_approval_meta
+before update on public.expenses
+for each row
+execute function public.set_expense_approval_meta();
+
 alter table public.payments
 drop constraint if exists payments_event_id_user_id_key;
 
