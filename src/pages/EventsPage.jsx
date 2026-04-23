@@ -1,0 +1,476 @@
+import { useEffect, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { Header, Card, Button, Badge, BottomNav, Modal, Input } from '../components'
+import { createEvent, deleteEvent, getEvents, getUserProfile, updateEvent } from '../lib/api'
+import { formatBangkokDateTime, getBangkokDateKey, toDateTimeLocalValue, toSupabaseDateTime } from '../lib/dateTime'
+import { motion } from 'framer-motion'
+import { Edit2, Plus, MapPin, Calendar, Trash2, XCircle } from 'lucide-react'
+import { useAuth } from '../contexts/AuthContext'
+import { useTeam } from '../contexts/TeamContext'
+
+const emptyForm = {
+  title: '',
+  date: '',
+  location: '',
+  court_number: '',
+}
+
+export const EventsPage = () => {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const { user } = useAuth()
+  const { currentTeam, loading: teamsLoading } = useTeam()
+  const [events, setEvents] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [modalOpen, setModalOpen] = useState(false)
+  const [currentUserRole, setCurrentUserRole] = useState('user')
+  const [editingEvent, setEditingEvent] = useState(null)
+  const [actionLoading, setActionLoading] = useState(false)
+  const [formData, setFormData] = useState(emptyForm)
+
+  useEffect(() => {
+    if (!currentTeam) {
+      setEvents([])
+      setLoading(false)
+      return
+    }
+
+    loadEvents()
+  }, [currentTeam?.team_id])
+
+  useEffect(() => {
+    if (!user) return
+    loadCurrentUserRole()
+  }, [user?.id])
+
+  useEffect(() => {
+    if (location.state?.openCreateEvent && currentTeam) {
+      openCreateModal()
+      navigate(location.pathname, { replace: true })
+    }
+  }, [location.state, currentTeam])
+
+  const loadCurrentUserRole = async () => {
+    try {
+      const profile = await getUserProfile(user.id)
+      setCurrentUserRole((profile.role || 'user').toLowerCase())
+    } catch (error) {
+      console.error('Error loading user role:', error)
+    }
+  }
+
+  const loadEvents = async () => {
+    if (!currentTeam) return
+
+    setLoading(true)
+    try {
+      const eventsData = await getEvents(currentTeam.team_id)
+      setEvents(eventsData)
+    } catch (error) {
+      console.error('Error loading events:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const openCreateModal = () => {
+    setEditingEvent(null)
+    setFormData(emptyForm)
+    setModalOpen(true)
+  }
+
+  const openEditModal = (event, e) => {
+    e.stopPropagation()
+    setEditingEvent(event)
+    setFormData({
+      title: event.title || '',
+      date: toDateTimeLocalValue(event.date),
+      location: event.location || '',
+      court_number: event.court_number ? String(event.court_number) : '',
+    })
+    setModalOpen(true)
+  }
+
+  const canManageEvent = (event) =>
+    event.created_by === user?.id || ['admin', 'sub_admin'].includes(currentUserRole)
+
+  const handleSaveEvent = async () => {
+    if (!formData.title || !formData.date || !currentTeam) return
+
+    try {
+      setActionLoading(true)
+      const payload = {
+        title: formData.title,
+        date: toSupabaseDateTime(formData.date),
+        location: formData.location,
+        court_number: formData.court_number ? parseInt(formData.court_number, 10) : null,
+        ...(editingEvent ? {} : { created_by: user.id }),
+      }
+
+      if (editingEvent) {
+        await updateEvent(editingEvent.id, payload)
+      } else {
+        await createEvent(payload, currentTeam.team_id)
+      }
+
+      setFormData(emptyForm)
+      setEditingEvent(null)
+      setModalOpen(false)
+      loadEvents()
+    } catch (error) {
+      console.error('Error saving event:', error)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleCancelEvent = async (event, e) => {
+    e.stopPropagation()
+
+    try {
+      setActionLoading(true)
+      await updateEvent(event.id, { status: 'CANCELLED' })
+      loadEvents()
+    } catch (error) {
+      console.error('Error cancelling event:', error)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleDeleteEvent = async (event, e) => {
+    e.stopPropagation()
+
+    try {
+      setActionLoading(true)
+      await deleteEvent(event.id)
+      loadEvents()
+    } catch (error) {
+      console.error('Error deleting event:', error)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const todayKey = getBangkokDateKey(new Date())
+  const todayEvents = events.filter((event) => getBangkokDateKey(event.date) === todayKey)
+  const upcomingEvents = events.filter((event) => getBangkokDateKey(event.date) > todayKey)
+  const pastEvents = events.filter((event) => getBangkokDateKey(event.date) < todayKey)
+
+  if (teamsLoading || (loading && currentTeam && events.length === 0)) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin w-12 h-12 border-4 border-primary-400 border-t-transparent rounded-full" />
+      </div>
+    )
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="pb-24"
+    >
+      <Header
+        title="Events"
+        subtitle={currentTeam?.teams?.name || 'No team selected'}
+        action={
+          currentTeam ? (
+            <button
+              onClick={openCreateModal}
+              className="p-2 hover:bg-white hover:bg-opacity-20 rounded-lg transition"
+            >
+              <Plus size={24} className="text-white" />
+            </button>
+          ) : null
+        }
+      />
+
+      <div className="container-mobile py-6 space-y-6">
+        {!currentTeam ? (
+          <Card className="text-center py-12">
+            <Calendar size={48} className="mx-auto text-neutral-300 mb-4" />
+            <p className="text-neutral-600 mb-4">Select a team on Home to view its events.</p>
+            <Button
+              onClick={() => navigate('/')}
+              variant="secondary"
+              className="w-full"
+            >
+              Go Home
+            </Button>
+          </Card>
+        ) : (
+          <>
+            {todayEvents.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+              >
+                <h2 className="text-sm font-semibold text-neutral-600 mb-3 uppercase">
+                  Today
+                </h2>
+                <div className="space-y-3">
+                  {todayEvents.map((event, idx) => (
+                    <motion.div
+                      key={event.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: idx * 0.1 }}
+                      onClick={() => navigate(`/event/${event.id}`)}
+                      className="cursor-pointer"
+                    >
+                      <Card className="hover:shadow-lg transition">
+                        <div className="flex items-start justify-between mb-3 gap-3">
+                          <div>
+                            <h3 className="font-semibold text-lg">{event.title}</h3>
+                            <p className="text-sm text-neutral-600">
+                              {formatBangkokDateTime(event.date)}
+                            </p>
+                          </div>
+                          <Badge status={event.status === 'CANCELLED' ? 'error' : getBangkokDateKey(event.date) === todayKey ? 'success' : 'default'}>
+                            {event.status === 'CANCELLED'
+                              ? 'Cancelled'
+                              : getBangkokDateKey(event.date) === todayKey
+                              ? 'Today'
+                              : 'Upcoming'}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-4 text-sm text-neutral-600">
+                          <div className="flex items-center gap-1">
+                            <MapPin size={16} />
+                            {event.location || 'Location TBD'}
+                          </div>
+                          {event.court_number && <div>Court {event.court_number}</div>}
+                        </div>
+                        {canManageEvent(event) && (
+                          <div className="mt-4 flex gap-2">
+                            <Button
+                              variant="secondary"
+                              className="flex-1"
+                              onClick={(e) => openEditModal(event, e)}
+                            >
+                              <span className="inline-flex items-center gap-2">
+                                <Edit2 size={14} />
+                                Edit
+                              </span>
+                            </Button>
+                            {event.status !== 'CANCELLED' && (
+                              <Button
+                                variant="secondary"
+                                className="flex-1"
+                                onClick={(e) => handleCancelEvent(event, e)}
+                              >
+                                <span className="inline-flex items-center gap-2">
+                                  <XCircle size={14} />
+                                  Cancel
+                                </span>
+                              </Button>
+                            )}
+                            <Button
+                              variant="danger"
+                              className="flex-1"
+                              onClick={(e) => handleDeleteEvent(event, e)}
+                              loading={actionLoading}
+                            >
+                              <span className="inline-flex items-center gap-2">
+                                <Trash2 size={14} />
+                                Delete
+                              </span>
+                            </Button>
+                          </div>
+                        )}
+                      </Card>
+                    </motion.div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+
+            {upcomingEvents.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: todayEvents.length > 0 ? 0.05 : 0 }}
+              >
+                <h2 className="text-sm font-semibold text-neutral-600 mb-3 uppercase">
+                  Upcoming
+                </h2>
+                <div className="space-y-3">
+                  {upcomingEvents.map((event, idx) => (
+                    <motion.div
+                      key={event.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: idx * 0.1 }}
+                      onClick={() => navigate(`/event/${event.id}`)}
+                      className="cursor-pointer"
+                    >
+                      <Card className="hover:shadow-lg transition">
+                        <div className="flex items-start justify-between mb-3 gap-3">
+                          <div>
+                            <h3 className="font-semibold text-lg">{event.title}</h3>
+                            <p className="text-sm text-neutral-600">
+                              {formatBangkokDateTime(event.date)}
+                            </p>
+                          </div>
+                          <Badge status={event.status === 'CANCELLED' ? 'error' : 'default'}>
+                            {event.status === 'CANCELLED' ? 'Cancelled' : 'Upcoming'}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-4 text-sm text-neutral-600">
+                          <div className="flex items-center gap-1">
+                            <MapPin size={16} />
+                            {event.location || 'Location TBD'}
+                          </div>
+                          {event.court_number && <div>Court {event.court_number}</div>}
+                        </div>
+                        {canManageEvent(event) && (
+                          <div className="mt-4 flex gap-2">
+                            <Button
+                              variant="secondary"
+                              className="flex-1"
+                              onClick={(e) => openEditModal(event, e)}
+                            >
+                              <span className="inline-flex items-center gap-2">
+                                <Edit2 size={14} />
+                                Edit
+                              </span>
+                            </Button>
+                            {event.status !== 'CANCELLED' && (
+                              <Button
+                                variant="secondary"
+                                className="flex-1"
+                                onClick={(e) => handleCancelEvent(event, e)}
+                              >
+                                <span className="inline-flex items-center gap-2">
+                                  <XCircle size={14} />
+                                  Cancel
+                                </span>
+                              </Button>
+                            )}
+                            <Button
+                              variant="danger"
+                              className="flex-1"
+                              onClick={(e) => handleDeleteEvent(event, e)}
+                              loading={actionLoading}
+                            >
+                              <span className="inline-flex items-center gap-2">
+                                <Trash2 size={14} />
+                                Delete
+                              </span>
+                            </Button>
+                          </div>
+                        )}
+                      </Card>
+                    </motion.div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+
+            {pastEvents.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
+              >
+                <h2 className="text-sm font-semibold text-neutral-600 mb-3 uppercase">
+                  Past Events
+                </h2>
+                <div className="space-y-3">
+                  {pastEvents.map((event) => (
+                    <Card
+                      key={event.id}
+                      onClick={() => navigate(`/event/${event.id}`)}
+                      className="cursor-pointer opacity-60 hover:opacity-100 transition"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h3 className="font-semibold">{event.title}</h3>
+                          <p className="text-sm text-neutral-600">
+                            {formatBangkokDateTime(event.date)}
+                          </p>
+                        </div>
+                        <Badge status={event.status === 'CANCELLED' ? 'error' : 'default'}>
+                          {event.status}
+                        </Badge>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+
+            {events.length === 0 && (
+              <Card className="text-center py-12">
+                <Calendar size={48} className="mx-auto text-neutral-300 mb-4" />
+                <p className="text-neutral-600 mb-4">No events yet for this team</p>
+                <Button
+                  onClick={openCreateModal}
+                  className="w-full"
+                >
+                  Create Event
+                </Button>
+              </Card>
+            )}
+          </>
+        )}
+      </div>
+
+      <Modal
+        isOpen={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title={editingEvent ? 'Edit Event' : 'Create Event'}
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => setModalOpen(false)}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSaveEvent}
+              className="flex-1"
+              disabled={!formData.title || !formData.date || !currentTeam}
+              loading={actionLoading}
+            >
+              {editingEvent ? 'Save' : 'Create'}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <Input
+            label="Event Title"
+            value={formData.title}
+            onChange={(e) => setFormData((prev) => ({ ...prev, title: e.target.value }))}
+            placeholder="e.g., Morning Session"
+          />
+          <Input
+            label="Date & Time"
+            type="datetime-local"
+            value={formData.date}
+            onChange={(e) => setFormData((prev) => ({ ...prev, date: e.target.value }))}
+          />
+          <Input
+            label="Location"
+            value={formData.location}
+            onChange={(e) => setFormData((prev) => ({ ...prev, location: e.target.value }))}
+            placeholder="Where will it be?"
+          />
+          <Input
+            label="Court Number"
+            type="number"
+            value={formData.court_number}
+            onChange={(e) => setFormData((prev) => ({ ...prev, court_number: e.target.value }))}
+            placeholder="1"
+          />
+        </div>
+      </Modal>
+
+      <BottomNav />
+    </motion.div>
+  )
+}
