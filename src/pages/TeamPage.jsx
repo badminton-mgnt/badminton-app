@@ -5,11 +5,13 @@ import { addTeamMember, deleteTeam, getAppUsers, getTeam, getTeamMembers, getUse
 import { motion } from 'framer-motion'
 import { Edit2, UserPlus, Users } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
+import { useTeam } from '../contexts/TeamContext'
 
 export const TeamPage = () => {
   const { teamId } = useParams()
   const navigate = useNavigate()
   const { user } = useAuth()
+  const { refreshTeams, currentTeam } = useTeam()
   const [team, setTeam] = useState(null)
   const [members, setMembers] = useState([])
   const [appUsers, setAppUsers] = useState([])
@@ -62,6 +64,8 @@ export const TeamPage = () => {
       setAssigningTreasurerId(memberUserId === null ? 'UNSET' : memberUserId)
       await updateTeamTreasurer(team.id, memberUserId)
       await loadData()
+      // Refresh the team context to update currentTeam in other components
+      await refreshTeams()
     } catch (error) {
       console.error('Error assigning team treasurer:', error)
     } finally {
