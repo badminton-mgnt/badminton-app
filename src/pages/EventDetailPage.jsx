@@ -519,7 +519,7 @@ export const EventDetailPage = () => {
   const approvedExpenses = expenses.filter((expense) => expense.status === 'APPROVED')
   const totalExpense = approvedExpenses.reduce((sum, expense) => sum + parseFloat(expense.amount), 0)
   const canRunSettlement = isJoiningClosed
-  const share = canRunSettlement && checkedInCount > 0 ? totalExpense / checkedInCount : 0
+  const share = canRunSettlement && checkedInCount > 0 ? Math.round((totalExpense / checkedInCount) * 100) / 100 : 0
   const userShare = isCheckedIn ? share : 0
   const treasuryUserId = teamTreasurerId
   const transferStatus = (status) => String(status || '').toUpperCase()
@@ -602,7 +602,7 @@ export const EventDetailPage = () => {
 
   const userPaidTotal = userContributionAmount
   const balance = isCheckedIn ? userContributionAmount - share : 0
-  const normalizedBalance = Math.abs(balance) < 0.01 ? 0 : balance
+  const normalizedBalance = Math.abs(balance) < 1.0 ? 0 : balance
 
   const waitingConfirmationPayments = paymentTransfers.filter(
     (transfer) =>
