@@ -61,6 +61,7 @@ CREATE TABLE event_participants (
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   checked_in BOOLEAN DEFAULT false,
   checked_in_at TIMESTAMP,
+  checked_in_by UUID REFERENCES users(id) ON DELETE SET NULL,
   UNIQUE(event_id, user_id)
 );
 
@@ -136,6 +137,7 @@ alter table public.expenses enable row level security;
 alter table public.payment_transfers enable row level security;
 alter table public.payment_info enable row level security;
 alter table public.event_participants enable row level security;
+alter table public.event_participants add column if not exists checked_in_by uuid references public.users(id) on delete set null;
 
 
 -- =====================================================
@@ -404,9 +406,10 @@ for insert
 to authenticated
 with check (
   exists (
-    select 1 from public.users u
-    where u.id = auth.uid()
-    and u.role in ('admin', 'sub_admin')
+    select 1
+    from public.team_members tm
+    where tm.team_id = events.team_id
+      and tm.user_id = auth.uid()
   )
 );
 
@@ -421,6 +424,11 @@ using (
     where u.id = auth.uid()
     and u.role in ('admin', 'sub_admin')
   )
+  or exists (
+    select 1 from public.teams t
+    where t.id = events.team_id
+    and t.treasurer_id = auth.uid()
+  )
 )
 with check (
   created_by = auth.uid()
@@ -428,6 +436,14 @@ with check (
     select 1 from public.users u
     where u.id = auth.uid()
     and u.role in ('admin', 'sub_admin')
+  )
+  or (
+    exists (
+      select 1 from public.teams t
+      where t.id = events.team_id
+      and t.treasurer_id = auth.uid()
+    )
+    and status = 'COMPLETED'
   )
 );
 
@@ -594,6 +610,9 @@ with check (auth.uid() = user_id);
 drop policy if exists "view participants" on public.event_participants;
 drop policy if exists "self check-in" on public.event_participants;
 drop policy if exists "update own check-in" on public.event_participants;
+drop policy if exists "self or manager check-in" on public.event_participants;
+drop policy if exists "update self or manager check-in" on public.event_participants;
+drop policy if exists "admin remove participants" on public.event_participants;
 
 create policy "view participants"
 on public.event_participants
@@ -609,18 +628,103 @@ using (
   )
 );
 
-create policy "self check-in"
+create policy "self or manager check-in"
 on public.event_participants
 for insert
 to authenticated
-with check (user_id = auth.uid());
+with check (
+  exists (
+    select 1
+    from public.events e
+    join public.team_members target_tm
+      on target_tm.team_id = e.team_id
+     and target_tm.user_id = event_participants.user_id
+    where e.id = event_participants.event_id
+      and (
+        event_participants.user_id = auth.uid()
+        or exists (
+          select 1
+          from public.users u
+          where u.id = auth.uid()
+            and u.role in ('admin', 'sub_admin')
+        )
+        or exists (
+          select 1
+          from public.teams t
+          where t.id = e.team_id
+            and t.treasurer_id = auth.uid()
+        )
+      )
+  )
+);
 
-create policy "update own check-in"
+create policy "update self or manager check-in"
 on public.event_participants
 for update
 to authenticated
-using (user_id = auth.uid())
-with check (user_id = auth.uid());
+using (
+  exists (
+    select 1
+    from public.events e
+    join public.team_members target_tm
+      on target_tm.team_id = e.team_id
+     and target_tm.user_id = event_participants.user_id
+    where e.id = event_participants.event_id
+      and (
+        event_participants.user_id = auth.uid()
+        or exists (
+          select 1
+          from public.users u
+          where u.id = auth.uid()
+            and u.role in ('admin', 'sub_admin')
+        )
+        or exists (
+          select 1
+          from public.teams t
+          where t.id = e.team_id
+            and t.treasurer_id = auth.uid()
+        )
+      )
+  )
+)
+with check (
+  exists (
+    select 1
+    from public.events e
+    join public.team_members target_tm
+      on target_tm.team_id = e.team_id
+     and target_tm.user_id = event_participants.user_id
+    where e.id = event_participants.event_id
+      and (
+        event_participants.user_id = auth.uid()
+        or exists (
+          select 1
+          from public.users u
+          where u.id = auth.uid()
+            and u.role in ('admin', 'sub_admin')
+        )
+        or exists (
+          select 1
+          from public.teams t
+          where t.id = e.team_id
+            and t.treasurer_id = auth.uid()
+        )
+      )
+  )
+);
+
+create policy "admin remove participants"
+on public.event_participants
+for delete
+to authenticated
+using (
+  exists (
+    select 1
+    from public.users u
+    where u.id = auth.uid()
+      and u.role = 'admin'
+  )
+);
 
 
 -- =====================================================

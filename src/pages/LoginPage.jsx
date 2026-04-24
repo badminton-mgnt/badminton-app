@@ -34,6 +34,7 @@ export const LoginPage = () => {
       }
     } finally {
       setLoading(false)
+      setFormData((prev) => ({ ...prev, password: '' }))
     }
   }
 

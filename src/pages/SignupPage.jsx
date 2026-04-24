@@ -59,6 +59,7 @@ export const SignupPage = () => {
       setError(err.message)
     } finally {
       setLoading(false)
+      setFormData((prev) => ({ ...prev, password: '', confirmPassword: '' }))
     }
   }
 
