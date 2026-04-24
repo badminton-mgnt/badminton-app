@@ -18,6 +18,7 @@ import { useTeam } from '../contexts/TeamContext'
 
 const CHECKIN_CONFIRM_WINDOW_DAYS = 3
 const DAY_IN_MS = 24 * 60 * 60 * 1000
+const isJoiningLockedStatus = (status) => ['FINALIZED', 'COMPLETED', 'CANCELLED'].includes(String(status || '').toUpperCase())
 
 const emptyForm = {
   title: '',
@@ -84,7 +85,7 @@ export const EventsPage = () => {
 
       const now = Date.now()
       const expiredCandidates = eventsData.filter((event) => {
-        if (event.status === 'CANCELLED') return false
+        if (!canCheckInEvent(event)) return false
         const eventDateKey = getBangkokDateKey(event.date)
         if (!eventDateKey || eventDateKey >= todayKey) return false
 
@@ -93,7 +94,7 @@ export const EventsPage = () => {
         return now > eventTime + (CHECKIN_CONFIRM_WINDOW_DAYS * DAY_IN_MS)
       })
       const pendingCandidates = eventsData.filter((event) => {
-        if (event.status === 'CANCELLED') return false
+        if (!canCheckInEvent(event)) return false
         const eventDateKey = getBangkokDateKey(event.date)
         if (!eventDateKey || eventDateKey >= todayKey) return false
 
@@ -190,6 +191,8 @@ export const EventsPage = () => {
   const canManageEvent = (event) =>
     event.created_by === user?.id || ['admin', 'sub_admin'].includes(currentUserRole)
 
+  const canCheckInEvent = (event) => !isJoiningLockedStatus(event?.status)
+
   const handleSaveEvent = async () => {
     if (!formData.title || !formData.date || !currentTeam) return
 
@@ -257,6 +260,10 @@ export const EventsPage = () => {
   const handleConfirmCheckInForPastEvent = async (event, e) => {
     e.stopPropagation()
 
+    if (!canCheckInEvent(event)) {
+      return
+    }
+
     try {
       setCheckInActionId(`checkin-${event.id}`)
       await checkinParticipant(event.id, user.id)
@@ -272,6 +279,10 @@ export const EventsPage = () => {
 
   const handleMarkDidNotJoin = async (event, e) => {
     e.stopPropagation()
+
+    if (!canCheckInEvent(event)) {
+      return
+    }
 
     setCheckInActionId(`dismiss-${event.id}`)
     rememberDismissedCheckInEvent(user.id, event.id)
