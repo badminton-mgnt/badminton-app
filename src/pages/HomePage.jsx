@@ -299,7 +299,7 @@ export const HomePage = () => {
         const checkedInCount = participantsData.filter((participant) => participant.checked_in).length
         const approvedExpenses = expensesData.filter((expense) => expense.status === 'APPROVED')
         const totalExpense = approvedExpenses.reduce((sum, expense) => sum + parseFloat(expense.amount), 0)
-        const share = checkedInCount > 0 ? totalExpense / checkedInCount : 0
+        const share = checkedInCount > 0 ? Math.round((totalExpense / checkedInCount) * 100) / 100 : 0
         const transferStatus = (status) => String(status || '').toUpperCase()
         const transferDirection = (direction) => String(direction || '').toUpperCase().trim()
         const isTransferConfirmed = (status) => ['CONFIRMED', 'COMPLETE', 'COMPLETED'].includes(transferStatus(status))
@@ -372,8 +372,10 @@ export const HomePage = () => {
           : settlementPaymentAmount + userApprovedExpenseTotal - confirmedIncomingPayoutAmount
 
         const balance = userIsCheckedIn
-          ? userContributionAmount - share
+          ? Math.round((userContributionAmount - share) * 100) / 100
           : 0
+
+        const normalizedBalance = Math.abs(balance) < 1.0 ? 0 : balance
 
         if (!userIsCheckedIn) {
           setPaymentSummary({
@@ -382,17 +384,17 @@ export const HomePage = () => {
             tone: 'default',
             label: 'Settled',
           })
-        } else if (balance < 0) {
+        } else if (normalizedBalance < 0) {
           setPaymentSummary({
             status: `You owe in ${currentTeam.teams.name}`,
-            amount: Math.abs(balance),
+            amount: Math.abs(normalizedBalance),
             tone: 'warning',
             label: 'Pending',
           })
-        } else if (balance > 0) {
+        } else if (normalizedBalance > 0) {
           setPaymentSummary({
             status: `${currentTeam.teams.name} owes you`,
-            amount: balance,
+            amount: normalizedBalance,
             tone: 'success',
             label: 'Credit',
           })
