@@ -3,12 +3,14 @@ import { useNavigate } from 'react-router-dom'
 import { Header, Card, Button, Input } from '../components'
 import { createTeam } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
+import { useTeam } from '../contexts/TeamContext'
 import { motion } from 'framer-motion'
 
 export const CreateTeamPage = () => {
   const maxTeamNameLength = 20
   const navigate = useNavigate()
   const { user } = useAuth()
+  const { refreshTeams, setCurrentTeam } = useTeam()
   const [teamName, setTeamName] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -25,7 +27,12 @@ export const CreateTeamPage = () => {
     setLoading(true)
 
     try {
-      await createTeam(teamName, user.id)
+      const createdTeam = await createTeam(teamName, user.id)
+      setCurrentTeam({
+        team_id: createdTeam.id,
+        teams: createdTeam,
+      })
+      await refreshTeams()
       navigate('/', { state: { success: true, message: 'Team created successfully!' } })
     } catch (err) {
       setError(err.message)

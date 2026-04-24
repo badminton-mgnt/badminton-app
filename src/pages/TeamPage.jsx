@@ -6,12 +6,13 @@ import { motion } from 'framer-motion'
 import { Edit2, UserPlus, Users } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { useTeam } from '../contexts/TeamContext'
+import { formatBangkokDateTime } from '../lib/dateTime'
 
 export const TeamPage = () => {
   const { teamId } = useParams()
   const navigate = useNavigate()
   const { user } = useAuth()
-  const { refreshTeams, currentTeam } = useTeam()
+  const { refreshTeams } = useTeam()
   const [team, setTeam] = useState(null)
   const [members, setMembers] = useState([])
   const [appUsers, setAppUsers] = useState([])
@@ -56,6 +57,7 @@ export const TeamPage = () => {
   const canManageTreasurer = ['admin', 'sub_admin'].includes(currentUserRole)
   const hasTreasurer = Boolean(team?.treasurer_id)
   const treasurerMember = members.find((member) => String(member.user_id) === String(team?.treasurer_id))
+  const teamCreatedSubtitle = team?.created_at ? `Created at ${formatBangkokDateTime(team.created_at)}` : undefined
 
   const handleAssignTreasurer = async (memberUserId) => {
     if (!canManageTreasurer || !team?.id) return
@@ -161,7 +163,7 @@ export const TeamPage = () => {
       animate={{ opacity: 1 }}
       className="pb-24"
     >
-      <Header title={team?.name || 'Team Members'} />
+      <Header title={team?.name || 'Team Members'} subtitle={teamCreatedSubtitle} />
 
       <div className="container-mobile py-6 space-y-6">
         <motion.div

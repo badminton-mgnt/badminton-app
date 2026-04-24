@@ -64,6 +64,7 @@ export const EventDetailPage = () => {
   const [activeTab, setActiveTab] = useState('settlement')
   const [selectedMembersToAdd, setSelectedMembersToAdd] = useState([])
   const [participantActionLoading, setParticipantActionLoading] = useState(false)
+  const [joiningClosing, setJoiningClosing] = useState(false)
   const [settlementCompleting, setSettlementCompleting] = useState(false)
   const [eventForm, setEventForm] = useState({
     title: '',
@@ -192,6 +193,10 @@ export const EventDetailPage = () => {
   }
 
   const handleOpenTreasuryTransferModal = async () => {
+    if (!isJoiningClosed) {
+      return
+    }
+
     setPaymentModalMode('PAY_TREASURER')
     setPaymentTarget(null)
     setPaymentTargetInfo(null)
@@ -226,6 +231,10 @@ export const EventDetailPage = () => {
   }
 
   const handleOpenPayoutModal = async (target) => {
+    if (!isJoiningClosed) {
+      return
+    }
+
     try {
       setActionLoading(true)
       setPaymentModalMode('PAY_MEMBER')
@@ -248,6 +257,10 @@ export const EventDetailPage = () => {
   const canManageParticipantCheckIn = ['admin', 'sub_admin'].includes(currentUserRole) || isTeamTreasurer
   const canAutoApproveExpense = ['admin', 'sub_admin'].includes(currentUserRole) || isTeamTreasurer
   const canManageTreasury = isTeamTreasurer
+  const normalizedEventStatus = String(event?.status || '').toUpperCase()
+  const isSettlementCompleted = normalizedEventStatus === 'COMPLETED'
+  const isJoiningClosed = ['FINALIZED', 'COMPLETED'].includes(normalizedEventStatus)
+  const canCloseJoining = ['admin', 'sub_admin'].includes(currentUserRole) || isTeamTreasurer
 
   const eventStartAtMs = event?.date ? new Date(event.date).getTime() : Number.NaN
   const hasValidEventStartAt = Number.isFinite(eventStartAtMs)
@@ -260,7 +273,7 @@ export const EventDetailPage = () => {
     : false
   const isToday = event?.date ? getBangkokDateKey(event.date) === getBangkokDateKey(new Date()) : false
   const isUpcomingEvent = hasValidEventStartAt ? eventStartAtMs > Date.now() : false
-  const requiresCheckInForDetails = event?.status !== 'CANCELLED'
+  const requiresCheckInForDetails = !['CANCELLED', 'FINALIZED', 'COMPLETED'].includes(normalizedEventStatus)
   const shouldRequireCheckInForAccess =
     !canBypassCheckInGate &&
     requiresCheckInForDetails &&
@@ -279,7 +292,7 @@ export const EventDetailPage = () => {
   const addableTeamMembers = teamMembers.filter((member) => !checkedInParticipantIdSet.has(String(member.user_id)))
 
   const handleCheckIn = async () => {
-    if (!isWithinCheckInWindow) {
+    if (!isWithinCheckInWindow || isJoiningClosed) {
       return
     }
 
@@ -316,7 +329,7 @@ export const EventDetailPage = () => {
   }
 
   const handleAddParticipantAsCheckedIn = async () => {
-    if (selectedMembersToAdd.length === 0 || !canManageParticipantCheckIn) {
+    if (selectedMembersToAdd.length === 0 || !canManageParticipantCheckIn || isJoiningClosed) {
       return
     }
 
@@ -335,7 +348,7 @@ export const EventDetailPage = () => {
   }
 
   const handleRemoveParticipant = async (participantId) => {
-    if (!participantId || currentUserRole !== 'admin') {
+    if (!participantId || currentUserRole !== 'admin' || isJoiningClosed) {
       return
     }
 
@@ -363,6 +376,11 @@ export const EventDetailPage = () => {
   }
 
   const handleCreateExpense = async () => {
+    if (!isJoiningClosed) {
+      setExpenseModalOpen(false)
+      return
+    }
+
     try {
       setActionLoading(true)
       await createExpense({
@@ -384,6 +402,11 @@ export const EventDetailPage = () => {
   }
 
   const handleSavePayment = async () => {
+    if (!isJoiningClosed) {
+      setPaymentModalOpen(false)
+      return
+    }
+
     try {
       setActionLoading(true)
 
@@ -495,7 +518,8 @@ export const EventDetailPage = () => {
   const checkedInCount = participants.filter((participant) => isParticipantCheckedIn(participant)).length
   const approvedExpenses = expenses.filter((expense) => expense.status === 'APPROVED')
   const totalExpense = approvedExpenses.reduce((sum, expense) => sum + parseFloat(expense.amount), 0)
-  const share = checkedInCount > 0 ? totalExpense / checkedInCount : 0
+  const canRunSettlement = isJoiningClosed
+  const share = canRunSettlement && checkedInCount > 0 ? totalExpense / checkedInCount : 0
   const userShare = isCheckedIn ? share : 0
   const treasuryUserId = teamTreasurerId
   const transferStatus = (status) => String(status || '').toUpperCase()
@@ -529,10 +553,14 @@ export const EventDetailPage = () => {
   const userApprovedExpenseTotal = approvedExpenses
     .filter((expense) => String(expense.user_id) === String(user.id))
     .reduce((sum, expense) => sum + parseFloat(expense.amount), 0)
-  const transferAmount = Math.max(userShare - userApprovedExpenseTotal - confirmedUserToTreasuryAmount, 0)
+  const transferAmount = canRunSettlement
+    ? Math.max(userShare - userApprovedExpenseTotal - confirmedUserToTreasuryAmount, 0)
+    : 0
 
   const userPaymentStatus =
-    transferAmount <= 0
+    !canRunSettlement
+      ? 'joining_open'
+      : transferAmount <= 0
       ? 'complete'
       : waitingUserToTreasuryAmount > 0
       ? 'waiting_confirm'
@@ -574,6 +602,7 @@ export const EventDetailPage = () => {
 
   const userPaidTotal = userContributionAmount
   const balance = isCheckedIn ? userContributionAmount - share : 0
+  const normalizedBalance = Math.abs(balance) < 0.01 ? 0 : balance
 
   const waitingConfirmationPayments = paymentTransfers.filter(
     (transfer) =>
@@ -584,9 +613,10 @@ export const EventDetailPage = () => {
 
   const waitingIncomingPayoutTransfer = incomingPayoutTransfers.find((transfer) => isTransferWaiting(transfer.status))
 
-  const membersNeedingPayout = participants
-    .filter((participant) => isParticipantCheckedIn(participant))
-    .map((participant) => {
+  const membersNeedingPayout = canRunSettlement
+    ? participants
+      .filter((participant) => isParticipantCheckedIn(participant))
+      .map((participant) => {
       const participantApprovedExpense = approvedExpenses
         .filter((expense) => String(expense.user_id) === String(participant.user_id))
         .reduce((sum, expense) => sum + Number(expense.amount || 0), 0)
@@ -631,7 +661,8 @@ export const EventDetailPage = () => {
         waitingTransfer: treasuryToMemberWaiting || null,
       }
     })
-    .filter((member) => String(member.user_id) !== String(treasuryUserId) && member.payoutNeeded > 0)
+      .filter((member) => String(member.user_id) !== String(treasuryUserId) && member.payoutNeeded > 0)
+    : []
 
   const payoutTransferAmount = paymentTarget
     ? Math.max(paymentTarget.payoutNeeded - (Number(paymentTarget?.waitingTransfer?.amount || 0)), 0)
@@ -674,39 +705,49 @@ export const EventDetailPage = () => {
   )
 
   const userPaymentStatusLabel =
-    userPaymentStatus === 'complete'
+    userPaymentStatus === 'joining_open'
+      ? 'Joining Open'
+      : userPaymentStatus === 'complete'
       ? 'Complete'
       : userPaymentStatus === 'waiting_confirm'
       ? 'Waiting Confirm'
       : 'Pending'
 
   const userPaymentStatusBadge =
-    userPaymentStatus === 'complete'
+    userPaymentStatus === 'joining_open'
+      ? 'default'
+      : userPaymentStatus === 'complete'
       ? 'success'
       : userPaymentStatus === 'waiting_confirm'
       ? 'warning'
       : 'warning'
 
   const paymentActionLabel =
-    userPaymentStatus === 'complete'
+    userPaymentStatus === 'joining_open'
+      ? 'Joining Open'
+      : userPaymentStatus === 'complete'
       ? 'View Transfer Info'
       : userPaymentStatus === 'waiting_confirm'
       ? 'Waiting Confirm'
       : 'Transfer & Confirm'
 
   const paymentStatusBadgeClassName =
-    userPaymentStatus === 'complete'
+    userPaymentStatus === 'joining_open'
+      ? 'border border-neutral-300 bg-white'
+      : userPaymentStatus === 'complete'
       ? 'border border-success-300 bg-white'
       : 'border border-warning-300'
 
   const paymentStatusHint =
-    userPaymentStatus === 'waiting_confirm'
+    userPaymentStatus === 'joining_open'
+      ? 'Settlement is locked until admin/treasurer marks Joining Closed.'
+      : userPaymentStatus === 'waiting_confirm'
       ? `Transferred đ ${formatVndAmount(Number(latestWaitingUserToTreasuryTransfer?.amount || waitingUserToTreasuryAmount || 0))} - waiting for treasurer confirmation`
       : isTeamTreasurer
       ? 'Treasurer payments are managed in the Treasury section.'
-      : balance < 0
+      : normalizedBalance < 0
       ? 'You need to pay this amount.'
-      : balance > 0
+      : normalizedBalance > 0
       ? 'The fund will reimburse this amount to you, so you do not need to transfer more.'
       : 'No additional transfer is needed.'
 
@@ -714,12 +755,33 @@ export const EventDetailPage = () => {
     amount: userPaidTotal,
     status: `Expense advanced: đ ${userApprovedExpenseTotal.toFixed(2)} | Settlement confirmed: đ ${confirmedUserToTreasuryAmount.toFixed(2)} | Reimbursed confirmed: đ ${confirmedIncomingPayoutAmount.toFixed(2)}`,
   }
-  const isSettlementCompleted = event?.status === 'COMPLETED'
   const isSettlementReadyToComplete =
     isTeamTreasurer &&
+    canRunSettlement &&
     Math.abs(treasuryNetFund - balance) < 0.01 &&
     waitingConfirmationPayments.length === 0 &&
     membersNeedingPayout.length === 0
+
+  const handleMarkJoiningClosed = async () => {
+    if (!canCloseJoining || isJoiningClosed) {
+      return
+    }
+
+    try {
+      setJoiningClosing(true)
+      const updatedEvent = await updateEvent(eventId, { status: 'FINALIZED' })
+      setEvent((prev) => ({
+        ...(prev || {}),
+        ...(updatedEvent || {}),
+        status: updatedEvent?.status || 'FINALIZED',
+      }))
+      await loadData()
+    } catch (error) {
+      console.error('Error marking joining closed:', error)
+    } finally {
+      setJoiningClosing(false)
+    }
+  }
 
   const handleMarkSettlementCompleted = async () => {
     if (!isTeamTreasurer || isSettlementCompleted || !isSettlementReadyToComplete) {
@@ -765,7 +827,7 @@ export const EventDetailPage = () => {
       />
 
       <div className="container-mobile py-6 space-y-6">
-        {shouldRequireCheckInForAccess && isCheckedIn && (
+        {isCheckedIn && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -884,6 +946,31 @@ export const EventDetailPage = () => {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
               >
+              {!isJoiningClosed && (
+                <Card className="mb-3 bg-warning-50 border-warning-200">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-xs text-neutral-600 uppercase">Joining Status</p>
+                      <p className="text-sm font-semibold text-neutral-800">
+                        {canCloseJoining
+                          ? 'Joining Open - mark Joining Closed after all players have joined.'
+                          : 'Joining Open - payment is calculated only after all admin/treasurer marks Joining Closed.'}
+                      </p>
+                    </div>
+                    {canCloseJoining && (
+                      <Button
+                        onClick={handleMarkJoiningClosed}
+                        loading={joiningClosing}
+                        disabled={joiningClosing || isSettlementCompleted}
+                        className="w-full sm:w-auto shrink-0 whitespace-nowrap"
+                      >
+                        Lock
+                      </Button>
+                    )}
+                  </div>
+                </Card>
+              )}
+
               <h2 className="text-sm font-semibold text-neutral-600 mb-3 uppercase">
                 Settlement
               </h2>
@@ -911,16 +998,18 @@ export const EventDetailPage = () => {
                   )}
                 </Card>
 
-                <Card className={balance < 0 ? 'bg-error-50' : 'bg-success-50'}>
+                <Card className={normalizedBalance < 0 ? 'bg-error-50' : 'bg-success-50'}>
                   <p className="text-xs text-neutral-600">Your Balance</p>
-                  <p className={`text-2xl font-bold ${balance < 0 ? 'text-error-800' : 'text-success-700'}`}>
-                    {balance < 0 ? `đ -${formatVndAmount(Math.abs(balance))}` : `đ ${formatVndAmount(balance)}`}
+                  <p className={`text-2xl font-bold ${normalizedBalance < 0 ? 'text-error-800' : 'text-success-700'}`}>
+                    {normalizedBalance < 0
+                      ? `đ -${formatVndAmount(Math.abs(normalizedBalance))}`
+                      : `đ ${formatVndAmount(normalizedBalance)}`}
                   </p>
                 </Card>
               </div>
 
               {!isTeamTreasurer && (
-                <Card className={`mt-3 ${balance < 0 ? 'bg-error-50 border-error-200' : 'bg-success-50 border-success-200'}`}>
+                <Card className={`mt-3 ${normalizedBalance < 0 ? 'bg-error-50 border-error-200' : 'bg-success-50 border-success-200'}`}>
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <p className="text-xs text-neutral-600">Payment Status</p>
@@ -929,12 +1018,12 @@ export const EventDetailPage = () => {
                         {paymentStatusHint}
                       </p>
                     </div>
-                    {balance < 0 && isCheckedIn && (
+                    {normalizedBalance < 0 && isCheckedIn && (
                       <Button
                         onClick={handleOpenTreasuryTransferModal}
                         variant="secondary"
                         className="w-full border border-warning-400 sm:w-auto"
-                        disabled={userPaymentStatus === 'waiting_confirm' || transferAmount <= 0 || !treasuryUserId}
+                        disabled={!isJoiningClosed || userPaymentStatus === 'waiting_confirm' || transferAmount <= 0 || !treasuryUserId}
                       >
                         {paymentActionLabel}
                       </Button>
@@ -960,7 +1049,7 @@ export const EventDetailPage = () => {
                   </Button>
                 </Card>
               )}
-              {balance < 0 && isCheckedIn && !treasuryUserId && (
+              {normalizedBalance < 0 && isCheckedIn && !treasuryUserId && (
                 <p className="text-xs text-warning-900">This team does not have a treasurer yet. Ask admin/sub-admin to set one.</p>
               )}
             </motion.div>
@@ -1126,7 +1215,7 @@ export const EventDetailPage = () => {
                         type="button"
                         className="w-full rounded-xl border border-neutral-200 p-3 text-left transition hover:bg-neutral-50"
                         onClick={() => handleOpenPayoutModal(member)}
-                        disabled={!canManageTreasury}
+                        disabled={!canManageTreasury || !isJoiningClosed}
                       >
                         <div className="flex items-center justify-between gap-2">
                           <div>
@@ -1156,6 +1245,9 @@ export const EventDetailPage = () => {
                 <h2 className="text-sm font-semibold text-neutral-600 uppercase">
                   Participants ({checkedInCount}/{teamMemberCount})
                 </h2>
+                <Badge status={isJoiningClosed ? 'success' : 'warning'}>
+                  {isJoiningClosed ? 'Joining Closed' : 'Joining Open'}
+                </Badge>
                 {canManageParticipantCheckIn && (
                   <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
                     <select
@@ -1166,7 +1258,7 @@ export const EventDetailPage = () => {
                         setSelectedMembersToAdd(selectedUserIds)
                       }}
                       className="w-full rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700 outline-none focus:border-primary-400 sm:w-56"
-                      disabled={participantActionLoading || addableTeamMembers.length === 0}
+                      disabled={isJoiningClosed || participantActionLoading || addableTeamMembers.length === 0}
                     >
                       {addableTeamMembers.map((member) => (
                         <option key={member.user_id} value={member.user_id}>
@@ -1177,7 +1269,7 @@ export const EventDetailPage = () => {
                     <Button
                       onClick={handleAddParticipantAsCheckedIn}
                       className="sm:w-auto"
-                      disabled={selectedMembersToAdd.length === 0 || participantActionLoading || addableTeamMembers.length === 0}
+                      disabled={isJoiningClosed || selectedMembersToAdd.length === 0 || participantActionLoading || addableTeamMembers.length === 0}
                       loading={participantActionLoading}
                     >
                       {selectedMembersToAdd.length > 0
@@ -1187,6 +1279,11 @@ export const EventDetailPage = () => {
                   </div>
                 )}
               </div>
+              {isJoiningClosed && (
+                <p className="mb-3 text-xs text-neutral-600">
+                  Joining is closed for this event. Participants cannot be added or removed.
+                </p>
+              )}
               <Card className="space-y-2">
                 {participants.length === 0 ? (
                   <p className="text-sm text-neutral-600">No one has checked in yet.</p>
@@ -1213,7 +1310,7 @@ export const EventDetailPage = () => {
                             className="px-2 py-1 text-xs"
                             onClick={() => handleRemoveParticipant(participant.id)}
                             loading={participantActionLoading}
-                            disabled={participantActionLoading}
+                            disabled={isJoiningClosed || participantActionLoading}
                           >
                             Remove
                           </Button>
@@ -1239,11 +1336,16 @@ export const EventDetailPage = () => {
                   onClick={() => setExpenseModalOpen(true)}
                   variant="secondary"
                   className="px-3 py-1 text-xs"
-                  disabled={!isCheckedIn}
+                  disabled={!isCheckedIn || !isJoiningClosed}
                 >
                   Add
                 </Button>
               </div>
+              {!isJoiningClosed && (
+                <p className="text-xs text-neutral-600 mb-3">
+                  Waiting admin/treasurer to mark Joining Closed before adding expenses.
+                </p>
+              )}
               {!isCheckedIn && (
                 <p className="text-xs text-neutral-600 mb-3">
                   Check in first to add your expense to this event.
@@ -1379,7 +1481,7 @@ export const EventDetailPage = () => {
             <Button
               onClick={handleCreateExpense}
               className="flex-1"
-              disabled={!expenseForm.amount || !expenseForm.description || !isCheckedIn}
+              disabled={!expenseForm.amount || !expenseForm.description || !isCheckedIn || !isJoiningClosed}
               loading={actionLoading}
             >
               Add
@@ -1422,7 +1524,7 @@ export const EventDetailPage = () => {
               <Button
                 onClick={handleSavePayment}
                 className="flex-1"
-                disabled={!isCheckedIn}
+                disabled={!isCheckedIn || !isJoiningClosed}
                 loading={actionLoading}
               >
                 I Have Transferred

@@ -303,9 +303,20 @@ on public.team_members
 for insert
 to authenticated
 with check (
-  exists (
-    select 1 from public.teams t
-    where t.id = team_members.team_id
+  (
+    user_id = auth.uid()
+    and exists (
+      select 1
+      from public.team_invitations ti
+      where ti.team_id = team_members.team_id
+        and lower(ti.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
+    )
+  )
+  or exists (
+    select 1
+    from public.users u
+    where u.id = auth.uid()
+      and u.role in ('admin', 'sub_admin')
   )
 );
 
@@ -443,7 +454,7 @@ with check (
       where t.id = events.team_id
       and t.treasurer_id = auth.uid()
     )
-    and status = 'COMPLETED'
+    and upper(coalesce(status, 'UPCOMING')) in ('FINALIZED', 'COMPLETED')
   )
 );
 
@@ -491,6 +502,13 @@ with check (
     select 1 from public.team_members tm
     where tm.team_id = expenses.team_id
     and tm.user_id = auth.uid()
+  )
+  and exists (
+    select 1
+    from public.events e
+    where e.id = expenses.event_id
+      and e.team_id = expenses.team_id
+      and upper(coalesce(e.status, 'UPCOMING')) in ('FINALIZED', 'COMPLETED')
   )
 );
 
@@ -555,7 +573,54 @@ using (
 )
 with check (
   to_user_id = auth.uid()
+  and status = 'CONFIRMED'
+  and confirmed_at is not null
 );
+
+create or replace function public.restrict_payment_transfer_confirmation_update()
+returns trigger
+language plpgsql
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'Authentication required';
+  end if;
+
+  if old.to_user_id <> auth.uid() then
+    raise exception 'Only receiver can confirm transfer';
+  end if;
+
+  if new.id <> old.id
+    or new.team_id <> old.team_id
+    or new.event_id <> old.event_id
+    or new.from_user_id <> old.from_user_id
+    or new.to_user_id <> old.to_user_id
+    or new.amount <> old.amount
+    or new.direction <> old.direction
+    or new.created_at <> old.created_at then
+    raise exception 'Only transfer confirmation fields can be updated';
+  end if;
+
+  if new.status <> 'CONFIRMED' then
+    raise exception 'Transfer status must be CONFIRMED';
+  end if;
+
+  if old.status = 'CONFIRMED' then
+    raise exception 'Transfer already confirmed';
+  end if;
+
+  new.confirmed_at := coalesce(new.confirmed_at, now());
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_restrict_payment_transfer_confirmation_update on public.payment_transfers;
+
+create trigger trg_restrict_payment_transfer_confirmation_update
+before update on public.payment_transfers
+for each row
+execute function public.restrict_payment_transfer_confirmation_update();
 
 
 -- =====================================================
@@ -640,6 +705,7 @@ with check (
       on target_tm.team_id = e.team_id
      and target_tm.user_id = event_participants.user_id
     where e.id = event_participants.event_id
+      and upper(coalesce(e.status, 'UPCOMING')) not in ('FINALIZED', 'COMPLETED', 'CANCELLED')
       and (
         event_participants.user_id = auth.uid()
         or exists (
@@ -670,6 +736,7 @@ using (
       on target_tm.team_id = e.team_id
      and target_tm.user_id = event_participants.user_id
     where e.id = event_participants.event_id
+      and upper(coalesce(e.status, 'UPCOMING')) not in ('FINALIZED', 'COMPLETED', 'CANCELLED')
       and (
         event_participants.user_id = auth.uid()
         or exists (
@@ -695,6 +762,7 @@ with check (
       on target_tm.team_id = e.team_id
      and target_tm.user_id = event_participants.user_id
     where e.id = event_participants.event_id
+      and upper(coalesce(e.status, 'UPCOMING')) not in ('FINALIZED', 'COMPLETED', 'CANCELLED')
       and (
         event_participants.user_id = auth.uid()
         or exists (
@@ -845,13 +913,6 @@ before update on public.expenses
 for each row
 execute function public.set_expense_approval_meta();
 
-alter table public.payments
-drop constraint if exists payments_event_id_user_id_key;
-
-alter table public.payments
-add constraint payments_event_id_user_id_key
-unique (event_id, user_id);
-
 alter table public.teams
 drop constraint if exists teams_name_check;
 
@@ -874,7 +935,5 @@ CREATE INDEX idx_team_deletion_logs_deleted_by ON team_deletion_logs(deleted_by)
 CREATE INDEX idx_events_team_id ON events(team_id);
 CREATE INDEX idx_expenses_event_id ON expenses(event_id);
 CREATE INDEX idx_expenses_user_id ON expenses(user_id);
-CREATE INDEX idx_payments_event_id ON payments(event_id);
-CREATE INDEX idx_payments_user_id ON payments(user_id);
 CREATE INDEX idx_event_participants_event_id ON event_participants(event_id);
 CREATE INDEX idx_event_participants_user_id ON event_participants(user_id);

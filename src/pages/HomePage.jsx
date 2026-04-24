@@ -28,6 +28,7 @@ import { useTeam } from '../contexts/TeamContext'
 
 const CHECKIN_PAYMENT_WINDOW_DAYS = 3
 const DAY_IN_MS = 24 * 60 * 60 * 1000
+const isJoiningLockedStatus = (status) => ['FINALIZED', 'COMPLETED', 'CANCELLED'].includes(String(status || '').toUpperCase())
 
 export const HomePage = () => {
   const navigate = useNavigate()
@@ -82,6 +83,8 @@ export const HomePage = () => {
   const isParticipantCheckedIn = (participant) =>
     Boolean(participant?.checked_in)
 
+  const canCheckInEvent = (event) => !isJoiningLockedStatus(event?.status)
+
   useEffect(() => {
     if (!user) return
     loadData()
@@ -133,11 +136,13 @@ export const HomePage = () => {
       const todayMatch = activeEvents.find((event) => getBangkokDateKey(event.date) === todayKey)
       const upcomingEvents = activeEvents.filter((event) => getBangkokDateKey(event.date) > todayKey)
       const pastEventsInGraceWindow = activeEvents.filter((event) => {
+        if (!canCheckInEvent(event)) return false
         const eventTime = new Date(event.date).getTime()
         if (!Number.isFinite(eventTime) || eventTime >= now) return false
         return now <= eventTime + (CHECKIN_PAYMENT_WINDOW_DAYS * DAY_IN_MS)
       })
       const pastEventsBeyondGraceWindow = activeEvents.filter((event) => {
+        if (!canCheckInEvent(event)) return false
         const eventTime = new Date(event.date).getTime()
         if (!Number.isFinite(eventTime) || eventTime >= now) return false
         return now > eventTime + (CHECKIN_PAYMENT_WINDOW_DAYS * DAY_IN_MS)
@@ -173,7 +178,13 @@ export const HomePage = () => {
       }
 
       const pendingCheckInEvents = []
-      if (todayMatch && !hasDismissedCheckInEvent(user.id, todayMatch.id) && !hasCheckedInEvent(user.id, todayMatch.id) && !todayEventCheckedIn) {
+      if (
+        todayMatch &&
+        canCheckInEvent(todayMatch) &&
+        !hasDismissedCheckInEvent(user.id, todayMatch.id) &&
+        !hasCheckedInEvent(user.id, todayMatch.id) &&
+        !todayEventCheckedIn
+      ) {
         pendingCheckInEvents.push(todayMatch)
       }
 
@@ -242,18 +253,28 @@ export const HomePage = () => {
 
       setPendingPastCheckInEvents(pendingCheckInEvents)
 
-      const paymentEvent =
-        todayMatch ||
-        upcomingEvents[0] ||
-        [...activeEvents].sort((a, b) => new Date(b.date) - new Date(a.date))[0]
+      if (activeEvents.length === 0) {
+        setPaymentSummary({
+          status: `No events yet in ${currentTeam.teams.name}`,
+          amount: 0,
+          tone: 'default',
+          label: 'No Events',
+        })
+        return
+      }
+
+      const settlementReadyEvents = activeEvents
+        .filter((event) => ['FINALIZED', 'COMPLETED'].includes(String(event.status || '').toUpperCase()))
+        .sort((a, b) => new Date(b.date) - new Date(a.date))
+      const paymentEvent = settlementReadyEvents[0]
       const teamTreasurerId = currentTeam?.teams?.treasurer_id
 
       if (!paymentEvent) {
         setPaymentSummary({
-          status: 'No event yet for this team',
+          status: `Waiting admin/treasurer to mark Joining Closed in ${currentTeam.teams.name}`,
           amount: 0,
           tone: 'default',
-          label: 'No Event',
+          label: 'Joining Open',
         })
         return
       }
@@ -415,6 +436,11 @@ export const HomePage = () => {
   const handleEventCheckInClick = (event, alreadyCheckedIn = false) => {
     if (!event) return
 
+    if (!canCheckInEvent(event)) {
+      navigate(`/event/${event.id}`)
+      return
+    }
+
     if (alreadyCheckedIn) {
       navigate(`/event/${event.id}`)
       return
@@ -443,7 +469,7 @@ export const HomePage = () => {
   }
 
   const handleCheckInForEvent = async (eventToCheckIn, navigateAfterCheckIn = false) => {
-    if (!eventToCheckIn) return
+    if (!eventToCheckIn || !canCheckInEvent(eventToCheckIn)) return
 
     try {
       setCheckInLoading(true)
@@ -608,6 +634,9 @@ export const HomePage = () => {
               <p className="text-neutral-600">Select a team to view its events.</p>
             </Card>
           ) : todayEvent ? (
+            (() => {
+              const todayEventCanCheckIn = canCheckInEvent(todayEvent)
+              return (
             <Card onClick={handleTodayEventClick} className="cursor-pointer hover:shadow-lg transition">
               <div className="flex items-start justify-between mb-3">
                 <div>
@@ -617,15 +646,23 @@ export const HomePage = () => {
                     {todayEvent.court_number ? ` - Court ${todayEvent.court_number}` : ''}
                   </p>
                 </div>
-                <Badge status={todayEventCheckedIn ? 'success' : 'warning'}>
-                  {todayEventCheckedIn ? 'Checked In' : 'Check In'}
+                <Badge status={todayEventCanCheckIn ? (todayEventCheckedIn ? 'success' : 'warning') : 'default'}>
+                  {todayEventCanCheckIn
+                    ? (todayEventCheckedIn ? 'Checked In' : 'Check In')
+                    : String(todayEvent.status || '').toUpperCase() === 'COMPLETED'
+                    ? 'Completed'
+                    : 'Joining Closed'}
                 </Badge>
               </div>
               <p className="text-sm text-neutral-600">{formatBangkokDateTime(todayEvent.date)}</p>
               <p className="text-xs text-neutral-500 mt-2">
-                {todayEventCheckedIn ? 'Tap to view event details.' : 'Tap to confirm check-in and open this event.'}
+                {todayEventCanCheckIn
+                  ? (todayEventCheckedIn ? 'Tap to view event details.' : 'Tap to confirm check-in and open this event.')
+                  : 'Tap to view event details.'}
               </p>
             </Card>
+              )
+            })()
           ) : (
             <Card
               onClick={() => navigate('/events', { state: { openCreateEvent: !hasUpcoming } })}
