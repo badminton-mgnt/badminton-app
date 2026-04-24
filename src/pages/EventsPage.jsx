@@ -1,12 +1,23 @@
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Header, Card, Button, Badge, BottomNav, Modal, Input } from '../components'
-import { createEvent, deleteEvent, getEvents, getUserProfile, updateEvent } from '../lib/api'
+import { checkinParticipant, createEvent, deleteEvent, getEventParticipants, getEvents, getUserProfile, updateEvent } from '../lib/api'
+import {
+  forgetCheckedInEvent,
+  forgetDismissedCheckInEvent,
+  hasCheckedInEvent,
+  hasDismissedCheckInEvent,
+  rememberCheckedInEvent,
+  rememberDismissedCheckInEvent,
+} from '../lib/checkinCache'
 import { formatBangkokDateTime, getBangkokDateKey, toDateTimeLocalValue, toSupabaseDateTime } from '../lib/dateTime'
 import { motion } from 'framer-motion'
 import { Edit2, Plus, MapPin, Calendar, Trash2, XCircle, ChevronDown, ChevronUp } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { useTeam } from '../contexts/TeamContext'
+
+const CHECKIN_CONFIRM_WINDOW_DAYS = 3
+const DAY_IN_MS = 24 * 60 * 60 * 1000
 
 const emptyForm = {
   title: '',
@@ -29,6 +40,8 @@ export const EventsPage = () => {
   const [actionLoading, setActionLoading] = useState(false)
   const [formData, setFormData] = useState(emptyForm)
   const [pastEventsExpanded, setPastEventsExpanded] = useState(false)
+  const [pendingCheckInEventIds, setPendingCheckInEventIds] = useState([])
+  const [checkInActionId, setCheckInActionId] = useState(null)
 
   useEffect(() => {
     if (!currentTeam) {
@@ -68,8 +81,89 @@ export const EventsPage = () => {
     try {
       const eventsData = await getEvents(currentTeam.team_id)
       setEvents(eventsData)
+
+      const now = Date.now()
+      const expiredCandidates = eventsData.filter((event) => {
+        if (event.status === 'CANCELLED') return false
+        const eventDateKey = getBangkokDateKey(event.date)
+        if (!eventDateKey || eventDateKey >= todayKey) return false
+
+        const eventTime = new Date(event.date).getTime()
+        if (!Number.isFinite(eventTime)) return false
+        return now > eventTime + (CHECKIN_CONFIRM_WINDOW_DAYS * DAY_IN_MS)
+      })
+      const pendingCandidates = eventsData.filter((event) => {
+        if (event.status === 'CANCELLED') return false
+        const eventDateKey = getBangkokDateKey(event.date)
+        if (!eventDateKey || eventDateKey >= todayKey) return false
+
+        const eventTime = new Date(event.date).getTime()
+        if (!Number.isFinite(eventTime)) return false
+        return now <= eventTime + (CHECKIN_CONFIRM_WINDOW_DAYS * DAY_IN_MS)
+      })
+
+      if (expiredCandidates.length > 0) {
+        await Promise.all(
+          expiredCandidates.map(async (event) => {
+            try {
+              const participants = await getEventParticipants(event.id)
+              const userCheckedIn = participants.some(
+                (participant) => String(participant.user_id) === String(user.id) && Boolean(participant.checked_in)
+              )
+
+              if (userCheckedIn) {
+                rememberCheckedInEvent(user.id, event.id)
+                forgetDismissedCheckInEvent(user.id, event.id)
+              } else {
+                rememberDismissedCheckInEvent(user.id, event.id)
+                forgetCheckedInEvent(user.id, event.id)
+              }
+            } catch (error) {
+              console.error('Error loading participants for expired event check-in:', error)
+              if (!hasCheckedInEvent(user.id, event.id)) {
+                rememberDismissedCheckInEvent(user.id, event.id)
+              }
+            }
+          })
+        )
+      }
+
+      if (pendingCandidates.length === 0) {
+        setPendingCheckInEventIds([])
+        return
+      }
+
+      const pendingStatuses = await Promise.all(
+        pendingCandidates.map(async (event) => {
+          try {
+            const participants = await getEventParticipants(event.id)
+            const userCheckedIn = participants.some(
+              (participant) => String(participant.user_id) === String(user.id) && Boolean(participant.checked_in)
+            )
+
+            if (userCheckedIn) {
+              rememberCheckedInEvent(user.id, event.id)
+              forgetDismissedCheckInEvent(user.id, event.id)
+            } else {
+              forgetCheckedInEvent(user.id, event.id)
+            }
+
+            return { event, userCheckedIn }
+          } catch (error) {
+            console.error('Error loading participants for pending event check-in:', error)
+            return { event, userCheckedIn: hasCheckedInEvent(user.id, event.id) }
+          }
+        })
+      )
+
+      const pendingIds = pendingStatuses
+        .filter((item) => !item.userCheckedIn && !hasDismissedCheckInEvent(user.id, item.event.id))
+        .map((item) => item.event.id)
+
+      setPendingCheckInEventIds(pendingIds)
     } catch (error) {
       console.error('Error loading events:', error)
+      setPendingCheckInEventIds([])
     } finally {
       setLoading(false)
     }
@@ -160,10 +254,39 @@ export const EventsPage = () => {
     }
   }
 
+  const handleConfirmCheckInForPastEvent = async (event, e) => {
+    e.stopPropagation()
+
+    try {
+      setCheckInActionId(`checkin-${event.id}`)
+      await checkinParticipant(event.id, user.id)
+      rememberCheckedInEvent(user.id, event.id)
+      forgetDismissedCheckInEvent(user.id, event.id)
+      await loadEvents()
+    } catch (error) {
+      console.error('Error confirming check-in for event:', error)
+    } finally {
+      setCheckInActionId(null)
+    }
+  }
+
+  const handleMarkDidNotJoin = async (event, e) => {
+    e.stopPropagation()
+
+    setCheckInActionId(`dismiss-${event.id}`)
+    rememberDismissedCheckInEvent(user.id, event.id)
+    forgetCheckedInEvent(user.id, event.id)
+    await loadEvents()
+    setCheckInActionId(null)
+  }
+
   const todayKey = getBangkokDateKey(new Date())
   const todayEvents = events.filter((event) => getBangkokDateKey(event.date) === todayKey)
   const upcomingEvents = events.filter((event) => getBangkokDateKey(event.date) > todayKey)
   const pastEvents = events.filter((event) => getBangkokDateKey(event.date) < todayKey)
+  const pendingCheckInIdSet = new Set(pendingCheckInEventIds.map((id) => String(id)))
+  const pendingCheckInPastEvents = pastEvents.filter((event) => pendingCheckInIdSet.has(String(event.id)))
+  const completedPastEvents = pastEvents.filter((event) => !pendingCheckInIdSet.has(String(event.id)))
 
   if (teamsLoading || (loading && currentTeam && events.length === 0)) {
     return (
@@ -307,6 +430,53 @@ export const EventsPage = () => {
               </motion.div>
             )}
 
+            {pendingCheckInPastEvents.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
+              >
+                <h2 className="text-sm font-semibold text-warning-900 mb-3 uppercase">
+                  Pending Check-In Confirmation
+                </h2>
+                <div className="space-y-3">
+                  {pendingCheckInPastEvents.map((event) => (
+                    <Card key={event.id} className="border border-warning-300 bg-warning-50">
+                      <div className="flex items-start justify-between gap-3 mb-3">
+                        <div>
+                          <h3 className="font-semibold text-lg">{event.title}</h3>
+                          <p className="text-sm text-neutral-700">{formatBangkokDateTime(event.date)}</p>
+                        </div>
+                        <Badge status="warning">Pending Confirm</Badge>
+                      </div>
+                      <p className="text-xs text-warning-900 mb-3">
+                        Confirm if you joined this event. After {CHECKIN_CONFIRM_WINDOW_DAYS} days, this event moves to Completed automatically.
+                      </p>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="secondary"
+                          className="flex-1"
+                          onClick={(e) => handleMarkDidNotJoin(event, e)}
+                          loading={checkInActionId === `dismiss-${event.id}`}
+                          disabled={Boolean(checkInActionId)}
+                        >
+                          I Didn&apos;t Join
+                        </Button>
+                        <Button
+                          className="flex-1"
+                          onClick={(e) => handleConfirmCheckInForPastEvent(event, e)}
+                          loading={checkInActionId === `checkin-${event.id}`}
+                          disabled={Boolean(checkInActionId)}
+                        >
+                          Check In
+                        </Button>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+            
             {upcomingEvents.length > 0 && (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
@@ -389,7 +559,7 @@ export const EventsPage = () => {
               </motion.div>
             )}
 
-            {pastEvents.length > 0 && (
+            {completedPastEvents.length > 0 && (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -404,7 +574,7 @@ export const EventsPage = () => {
                     <div className="flex items-center justify-between gap-3">
                       <div className="text-left">
                         <h2 className="text-sm font-semibold text-neutral-700 uppercase">Completed Events</h2>
-                        <p className="text-xs text-neutral-500">{`${pastEvents.length} events saved`}</p>
+                        <p className="text-xs text-neutral-500">{`${completedPastEvents.length} events saved`}</p>
                       </div>
                       <span className="text-neutral-500">
                         {pastEventsExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
@@ -414,7 +584,7 @@ export const EventsPage = () => {
 
                 {pastEventsExpanded && (
                   <div className="mt-3 space-y-3 border-t border-neutral-200 pt-3">
-                    {pastEvents.map((event) => (
+                    {completedPastEvents.map((event) => (
                       <div
                         key={event.id}
                         onClick={() => navigate(`/event/${event.id}`)}

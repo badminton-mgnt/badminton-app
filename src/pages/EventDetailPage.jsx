@@ -13,16 +13,24 @@ import {
   getTeam,
   getTeamMembers,
   getPaymentInfo,
+  removeEventParticipant,
   getUserProfile,
   updateExpenseStatus,
   updateEvent,
 } from '../lib/api'
-import { forgetCheckedInEvent, hasCheckedInEvent, rememberCheckedInEvent } from '../lib/checkinCache'
+import {
+  forgetCheckedInEvent,
+  hasCheckedInEvent,
+  rememberCheckedInEvent,
+} from '../lib/checkinCache'
 import { formatVndAmount } from '../lib/currency'
 import { formatBangkokDateTime, getBangkokDateKey, toDateTimeLocalValue, toSupabaseDateTime } from '../lib/dateTime'
 import { motion } from 'framer-motion'
 import { CheckCircle2, QrCode } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
+
+const CHECKIN_PAYMENT_WINDOW_DAYS = 3
+const DAY_IN_MS = 24 * 60 * 60 * 1000
 
 export const EventDetailPage = () => {
   const { eventId } = useParams()
@@ -30,6 +38,7 @@ export const EventDetailPage = () => {
   const { user } = useAuth()
   const [event, setEvent] = useState(null)
   const [participants, setParticipants] = useState([])
+  const [teamMembers, setTeamMembers] = useState([])
   const [teamMemberCount, setTeamMemberCount] = useState(0)
   const [expenses, setExpenses] = useState([])
   const [paymentTransfers, setPaymentTransfers] = useState([])
@@ -53,6 +62,9 @@ export const EventDetailPage = () => {
   const [loadingReceiverInfo, setLoadingReceiverInfo] = useState(false)
   const [receiverPaymentInfoError, setReceiverPaymentInfoError] = useState('')
   const [activeTab, setActiveTab] = useState('settlement')
+  const [selectedMembersToAdd, setSelectedMembersToAdd] = useState([])
+  const [participantActionLoading, setParticipantActionLoading] = useState(false)
+  const [settlementCompleting, setSettlementCompleting] = useState(false)
   const [eventForm, setEventForm] = useState({
     title: '',
     date: '',
@@ -97,9 +109,11 @@ export const EventDetailPage = () => {
         ])
 
         if (teamMembersResult.status === 'fulfilled') {
+          setTeamMembers(teamMembersResult.value)
           setTeamMemberCount(teamMembersResult.value.length)
         } else {
           console.error('Error loading team members:', teamMembersResult.reason)
+          setTeamMembers([])
           setTeamMemberCount(0)
         }
 
@@ -111,6 +125,7 @@ export const EventDetailPage = () => {
           setTeamTreasurerId(null)
         }
       } else {
+        setTeamMembers([])
         setTeamMemberCount(0)
         setTeamTreasurerId(null)
       }
@@ -225,31 +240,49 @@ export const EventDetailPage = () => {
     }
   }
 
-  const canManageEvent =
-    event?.created_by === user?.id || ['admin', 'sub_admin'].includes(currentUserRole)
   const isTeamTreasurer =
     Boolean(teamTreasurerId) &&
     Boolean(user?.id) &&
     String(teamTreasurerId).toLowerCase() === String(user.id).toLowerCase()
+  const canBypassCheckInGate = currentUserRole === 'admin'
+  const canManageParticipantCheckIn = ['admin', 'sub_admin'].includes(currentUserRole) || isTeamTreasurer
   const canAutoApproveExpense = ['admin', 'sub_admin'].includes(currentUserRole) || isTeamTreasurer
   const canManageTreasury = isTeamTreasurer
 
   const eventStartAtMs = event?.date ? new Date(event.date).getTime() : Number.NaN
   const hasValidEventStartAt = Number.isFinite(eventStartAtMs)
   const isEventPast = hasValidEventStartAt ? eventStartAtMs < Date.now() : false
+  const checkInDeadlineAtMs = hasValidEventStartAt
+    ? eventStartAtMs + (CHECKIN_PAYMENT_WINDOW_DAYS * DAY_IN_MS)
+    : Number.NaN
+  const isWithinCheckInWindow = Number.isFinite(checkInDeadlineAtMs)
+    ? Date.now() <= checkInDeadlineAtMs
+    : false
   const isToday = event?.date ? getBangkokDateKey(event.date) === getBangkokDateKey(new Date()) : false
   const isUpcomingEvent = hasValidEventStartAt ? eventStartAtMs > Date.now() : false
-  const requiresCheckInForDetails = isToday || isEventPast
+  const requiresCheckInForDetails = event?.status !== 'CANCELLED'
+  const shouldRequireCheckInForAccess =
+    !canBypassCheckInGate &&
+    requiresCheckInForDetails &&
+    (isToday || (isEventPast && isWithinCheckInWindow))
   const headerStatusLabel = isToday ? 'Today' : isUpcomingEvent ? 'Upcoming' : ''
   const headerStatusBadge = isToday ? 'success' : isUpcomingEvent ? 'warning' : 'default'
   const currentParticipant = participants.find((participant) => String(participant.user_id) === String(user.id))
   const isCheckedIn = isParticipantCheckedIn(currentParticipant) || hasCheckedInEvent(user.id, eventId)
-  const canViewProtectedDetails = canManageEvent || !requiresCheckInForDetails || isCheckedIn
+  const canViewProtectedDetails = !shouldRequireCheckInForAccess || isCheckedIn
   const checkedInAtLabel = currentParticipant?.checked_in_at
     ? formatBangkokDateTime(currentParticipant.checked_in_at)
     : ''
+  const checkedInByName = currentParticipant?.checked_in_by_user?.name || ''
+  const checkedInBySelf = Boolean(currentParticipant?.checked_in_by) && String(currentParticipant.checked_in_by) === String(user.id)
+  const checkedInParticipantIdSet = new Set(participants.map((participant) => String(participant.user_id)))
+  const addableTeamMembers = teamMembers.filter((member) => !checkedInParticipantIdSet.has(String(member.user_id)))
 
   const handleCheckIn = async () => {
+    if (!isWithinCheckInWindow) {
+      return
+    }
+
     try {
       setActionLoading(true)
       const participant = await checkinParticipant(eventId, user.id)
@@ -279,6 +312,41 @@ export const EventDetailPage = () => {
       console.error('Error checking in:', error)
     } finally {
       setActionLoading(false)
+    }
+  }
+
+  const handleAddParticipantAsCheckedIn = async () => {
+    if (selectedMembersToAdd.length === 0 || !canManageParticipantCheckIn) {
+      return
+    }
+
+    try {
+      setParticipantActionLoading(true)
+      await Promise.all(
+        selectedMembersToAdd.map((memberUserId) => checkinParticipant(eventId, memberUserId, user.id))
+      )
+      setSelectedMembersToAdd([])
+      await loadData()
+    } catch (error) {
+      console.error('Error adding participant to event:', error)
+    } finally {
+      setParticipantActionLoading(false)
+    }
+  }
+
+  const handleRemoveParticipant = async (participantId) => {
+    if (!participantId || currentUserRole !== 'admin') {
+      return
+    }
+
+    try {
+      setParticipantActionLoading(true)
+      await removeEventParticipant(participantId)
+      await loadData()
+    } catch (error) {
+      console.error('Error removing event participant:', error)
+    } finally {
+      setParticipantActionLoading(false)
     }
   }
 
@@ -470,21 +538,48 @@ export const EventDetailPage = () => {
       ? 'waiting_confirm'
       : 'pending'
 
-  const userPaidTotal = confirmedUserToTreasuryAmount + userApprovedExpenseTotal
-  const balance = isCheckedIn ? userPaidTotal - share : 0
+  const incomingPayoutTransfers = paymentTransfers.filter(
+    (transfer) =>
+      String(transfer.from_user_id) === String(treasuryUserId) &&
+      String(transfer.to_user_id) === String(user.id) &&
+      isFromTreasuryTransfer(transfer)
+  )
+
+  const confirmedIncomingPayoutAmount = incomingPayoutTransfers
+    .filter((transfer) => isTransferConfirmed(transfer.status))
+    .reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
+
+  const confirmedOutgoingFromTreasuryAmount = paymentTransfers
+    .filter(
+      (transfer) =>
+        String(transfer.from_user_id) === String(user.id) &&
+        isFromTreasuryTransfer(transfer) &&
+        isTransferConfirmed(transfer.status)
+    )
+    .reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
+
+  const confirmedIncomingToTreasuryAmount = paymentTransfers
+    .filter(
+      (transfer) =>
+        String(transfer.to_user_id) === String(user.id) &&
+        isToTreasuryTransfer(transfer) &&
+        isTransferConfirmed(transfer.status)
+    )
+    .reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
+
+  const isCurrentUserTreasurer = String(user.id) === String(treasuryUserId)
+  const userContributionAmount = isCurrentUserTreasurer
+    ? userApprovedExpenseTotal + confirmedOutgoingFromTreasuryAmount - confirmedIncomingToTreasuryAmount
+    : confirmedUserToTreasuryAmount + userApprovedExpenseTotal - confirmedIncomingPayoutAmount
+
+  const userPaidTotal = userContributionAmount
+  const balance = isCheckedIn ? userContributionAmount - share : 0
 
   const waitingConfirmationPayments = paymentTransfers.filter(
     (transfer) =>
       String(transfer.to_user_id) === String(treasuryUserId) &&
       isToTreasuryTransfer(transfer) &&
       isTransferWaiting(transfer.status)
-  )
-
-  const incomingPayoutTransfers = paymentTransfers.filter(
-    (transfer) =>
-      String(transfer.from_user_id) === String(treasuryUserId) &&
-      String(transfer.to_user_id) === String(user.id) &&
-      isFromTreasuryTransfer(transfer)
   )
 
   const waitingIncomingPayoutTransfer = incomingPayoutTransfers.find((transfer) => isTransferWaiting(transfer.status))
@@ -565,6 +660,18 @@ export const EventDetailPage = () => {
     .reduce((sum, expense) => sum + Number(expense.amount || 0), 0)
 
   const treasuryNetFund = confirmedToTreasuryAmount - confirmedFromTreasuryAmount - treasuryApprovedExpenseTotal
+  const confirmedTreasuryReceivedTransfers = paymentTransfers.filter(
+    (transfer) =>
+      String(transfer.to_user_id) === String(treasuryUserId) &&
+      isToTreasuryTransfer(transfer) &&
+      isTransferConfirmed(transfer.status)
+  )
+  const confirmedTreasurySentTransfers = paymentTransfers.filter(
+    (transfer) =>
+      String(transfer.from_user_id) === String(treasuryUserId) &&
+      isFromTreasuryTransfer(transfer) &&
+      isTransferConfirmed(transfer.status)
+  )
 
   const userPaymentStatusLabel =
     userPaymentStatus === 'complete'
@@ -595,6 +702,8 @@ export const EventDetailPage = () => {
   const paymentStatusHint =
     userPaymentStatus === 'waiting_confirm'
       ? `Transferred đ ${formatVndAmount(Number(latestWaitingUserToTreasuryTransfer?.amount || waitingUserToTreasuryAmount || 0))} - waiting for treasurer confirmation`
+      : isTeamTreasurer
+      ? 'Treasurer payments are managed in the Treasury section.'
       : balance < 0
       ? 'You need to pay this amount.'
       : balance > 0
@@ -603,7 +712,33 @@ export const EventDetailPage = () => {
 
   const userPayment = {
     amount: userPaidTotal,
-    status: `Expense advanced: đ ${userApprovedExpenseTotal.toFixed(2)} | Settlement confirmed: đ ${confirmedUserToTreasuryAmount.toFixed(2)}`,
+    status: `Expense advanced: đ ${userApprovedExpenseTotal.toFixed(2)} | Settlement confirmed: đ ${confirmedUserToTreasuryAmount.toFixed(2)} | Reimbursed confirmed: đ ${confirmedIncomingPayoutAmount.toFixed(2)}`,
+  }
+  const isSettlementCompleted = event?.status === 'COMPLETED'
+  const isSettlementReadyToComplete =
+    isTeamTreasurer &&
+    Math.abs(treasuryNetFund - balance) < 0.01 &&
+    waitingConfirmationPayments.length === 0 &&
+    membersNeedingPayout.length === 0
+
+  const handleMarkSettlementCompleted = async () => {
+    if (!isTeamTreasurer || isSettlementCompleted || !isSettlementReadyToComplete) {
+      return
+    }
+
+    try {
+      setSettlementCompleting(true)
+      const updatedEvent = await updateEvent(eventId, { status: 'COMPLETED' })
+      setEvent((prev) => ({
+        ...(prev || {}),
+        ...(updatedEvent || {}),
+        status: updatedEvent?.status || 'COMPLETED',
+      }))
+    } catch (error) {
+      console.error('Error completing settlement:', error)
+    } finally {
+      setSettlementCompleting(false)
+    }
   }
 
   return (
@@ -630,7 +765,7 @@ export const EventDetailPage = () => {
       />
 
       <div className="container-mobile py-6 space-y-6">
-        {isToday && !isEventPast && event?.status !== 'CANCELLED' && (
+        {shouldRequireCheckInForAccess && isCheckedIn && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -639,11 +774,13 @@ export const EventDetailPage = () => {
               <div className="flex items-center justify-between gap-3">
                 <div>    
                   <p className="font-semibold">
-                    {isCheckedIn ? 'You are checked in for this event.' : 'Check in to join this event today.'}
+                    {isCheckedIn ? 'You are checked in for this event.' : 'Check in to include this event in settlement.'}
                   </p>
                   {isCheckedIn && checkedInAtLabel && (
                     <p className="text-xs text-neutral-600 mt-1">
-                      Checked in at {checkedInAtLabel}
+                      {checkedInByName && !checkedInBySelf
+                        ? `Checked in by ${checkedInByName} at ${checkedInAtLabel}`
+                        : `Checked in at ${checkedInAtLabel}`}
                     </p>
                   )}
                 </div>
@@ -666,15 +803,25 @@ export const EventDetailPage = () => {
           <Card className="space-y-4">
             <p className="text-sm text-neutral-600">
               {isEventPast
-                ? 'You did not check in for this event, so the event details are not available.'
-                : 'Check in from the Home page before opening today\'s event details.'}
+                ? 'You did not check in for this event, so you cannot view this event details page.'
+                : 'You need to check in before opening this event details page.'}
             </p>
             <p className="text-sm text-neutral-600">
               {`Your amount stays at đ ${formatVndAmount(0)} if you do not check in for this event.`}
             </p>
-            <Button variant="secondary" onClick={() => navigate('/')}>
-              Back to Home
-            </Button>
+            <div className="space-y-3 pt-1">
+              {isWithinCheckInWindow && (
+                <Button onClick={handleCheckIn} loading={actionLoading} className="w-full">
+                  <span className="inline-flex items-center gap-2">
+                    <CheckCircle2 size={16} />
+                    Check In
+                  </span>
+                </Button>
+              )}
+              <Button variant="secondary" onClick={() => navigate('/')} className="w-full">
+                Back to Home
+              </Button>
+            </div>
           </Card>
         ) : (
           <>
@@ -772,27 +919,29 @@ export const EventDetailPage = () => {
                 </Card>
               </div>
 
-              <Card className={`mt-3 ${balance < 0 ? 'bg-error-50 border-error-200' : 'bg-success-50 border-success-200'}`}>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <p className="text-xs text-neutral-600">Payment Status</p>
-                    <Badge status={userPaymentStatusBadge} className={paymentStatusBadgeClassName}>{userPaymentStatusLabel}</Badge>
-                    <p className={`mt-2 text-xs ${userPaymentStatus === 'waiting_confirm' ? 'text-warning-900' : 'text-neutral-600'}`}>
-                      {paymentStatusHint}
-                    </p>
+              {!isTeamTreasurer && (
+                <Card className={`mt-3 ${balance < 0 ? 'bg-error-50 border-error-200' : 'bg-success-50 border-success-200'}`}>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-xs text-neutral-600">Payment Status</p>
+                      <Badge status={userPaymentStatusBadge} className={paymentStatusBadgeClassName}>{userPaymentStatusLabel}</Badge>
+                      <p className={`mt-2 text-xs ${userPaymentStatus === 'waiting_confirm' ? 'text-warning-900' : 'text-neutral-600'}`}>
+                        {paymentStatusHint}
+                      </p>
+                    </div>
+                    {balance < 0 && isCheckedIn && (
+                      <Button
+                        onClick={handleOpenTreasuryTransferModal}
+                        variant="secondary"
+                        className="w-full border border-warning-400 sm:w-auto"
+                        disabled={userPaymentStatus === 'waiting_confirm' || transferAmount <= 0 || !treasuryUserId}
+                      >
+                        {paymentActionLabel}
+                      </Button>
+                    )}
                   </div>
-                  {balance < 0 && isCheckedIn && (
-                    <Button
-                      onClick={handleOpenTreasuryTransferModal}
-                      variant="secondary"
-                      className="w-full border border-warning-400 sm:w-auto"
-                      disabled={userPaymentStatus === 'waiting_confirm' || transferAmount <= 0 || !treasuryUserId}
-                    >
-                      {paymentActionLabel}
-                    </Button>
-                  )}
-                </div>
-              </Card>
+                </Card>
+              )}
 
               {waitingIncomingPayoutTransfer && (
                 <Card className="mt-3 space-y-2 bg-warning-50 border-warning-200">
@@ -907,6 +1056,61 @@ export const EventDetailPage = () => {
                       : `đ -${formatVndAmount(Math.abs(treasuryNetFund))}`}
                   </p>
                 </div>
+                {isTeamTreasurer && (
+                  <div className="rounded-xl border border-neutral-200 p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-neutral-600">Settlement Status</p>
+                      <Badge status={isSettlementCompleted ? 'success' : isSettlementReadyToComplete ? 'warning' : 'default'}>
+                        {isSettlementCompleted ? 'Completed' : isSettlementReadyToComplete ? 'Ready' : 'In Progress'}
+                      </Badge>
+                    </div>
+                    <Button
+                      onClick={handleMarkSettlementCompleted}
+                      loading={settlementCompleting}
+                      disabled={settlementCompleting || isSettlementCompleted || !isSettlementReadyToComplete}
+                      className="w-full sm:w-auto"
+                    >
+                      {isSettlementCompleted ? 'Settlement Completed' : 'Set Settlement Completed'}
+                    </Button>
+                  </div>
+                )}
+              </Card>
+
+              <Card className="mt-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-neutral-600 uppercase">Confirmed Treasury Transfers</p>
+                  <Badge status="default">Audit</Badge>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase text-neutral-600">Treasury Received</p>
+                    {confirmedTreasuryReceivedTransfers.length === 0 ? (
+                      <p className="text-xs text-neutral-500">No confirmed received transfers yet.</p>
+                    ) : (
+                      confirmedTreasuryReceivedTransfers.map((transfer) => (
+                        <div key={`recv-${transfer.id}`} className="rounded-lg border border-neutral-200 p-2">
+                          <p className="text-sm font-semibold">{transfer.from_user?.name || 'Unknown member'}</p>
+                          <p className="text-xs text-neutral-600">{`Amount: đ ${formatVndAmount(transfer.amount)}`}</p>
+                          <p className="text-xs text-neutral-500">{`Received at: ${transfer.confirmed_at ? formatBangkokDateTime(transfer.confirmed_at) : '-'}`}</p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase text-neutral-600">Treasury Sent</p>
+                    {confirmedTreasurySentTransfers.length === 0 ? (
+                      <p className="text-xs text-neutral-500">No confirmed sent transfers yet.</p>
+                    ) : (
+                      confirmedTreasurySentTransfers.map((transfer) => (
+                        <div key={`sent-${transfer.id}`} className="rounded-lg border border-neutral-200 p-2">
+                          <p className="text-sm font-semibold">{transfer.to_user?.name || 'Unknown member'}</p>
+                          <p className="text-xs text-neutral-600">{`Amount: đ ${formatVndAmount(transfer.amount)}`}</p>
+                          <p className="text-xs text-neutral-500">{`Sent at: ${transfer.confirmed_at ? formatBangkokDateTime(transfer.confirmed_at) : '-'}`}</p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
               </Card>
 
               {membersNeedingPayout.length > 0 && (
@@ -948,19 +1152,73 @@ export const EventDetailPage = () => {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
               >
-              <h2 className="text-sm font-semibold text-neutral-600 mb-3 uppercase">
-                Participants ({checkedInCount}/{teamMemberCount})
-              </h2>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-sm font-semibold text-neutral-600 uppercase">
+                  Participants ({checkedInCount}/{teamMemberCount})
+                </h2>
+                {canManageParticipantCheckIn && (
+                  <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+                    <select
+                      multiple
+                      value={selectedMembersToAdd}
+                      onChange={(e) => {
+                        const selectedUserIds = Array.from(e.target.selectedOptions).map((option) => option.value)
+                        setSelectedMembersToAdd(selectedUserIds)
+                      }}
+                      className="w-full rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700 outline-none focus:border-primary-400 sm:w-56"
+                      disabled={participantActionLoading || addableTeamMembers.length === 0}
+                    >
+                      {addableTeamMembers.map((member) => (
+                        <option key={member.user_id} value={member.user_id}>
+                          {member.users?.name || 'Unknown member'}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      onClick={handleAddParticipantAsCheckedIn}
+                      className="sm:w-auto"
+                      disabled={selectedMembersToAdd.length === 0 || participantActionLoading || addableTeamMembers.length === 0}
+                      loading={participantActionLoading}
+                    >
+                      {selectedMembersToAdd.length > 0
+                        ? `Add Checked-In (${selectedMembersToAdd.length})`
+                        : 'Add Checked-In'}
+                    </Button>
+                  </div>
+                )}
+              </div>
               <Card className="space-y-2">
                 {participants.length === 0 ? (
                   <p className="text-sm text-neutral-600">No one has checked in yet.</p>
                 ) : (
                   participants.map((participant) => (
                     <div key={participant.id} className="flex items-center justify-between py-2 border-b last:border-b-0">
-                      <span className="text-sm">{participant.users?.name}</span>
-                      <Badge status={participant.checked_in ? 'success' : 'warning'}>
-                        {participant.checked_in ? 'Checked In' : 'Not Checked'}
-                      </Badge>
+                      <div>
+                        <span className="text-sm">{participant.users?.name}</span>
+                        {participant.checked_in && participant.checked_in_at && (
+                          <p className="text-xs text-neutral-600 mt-1">
+                            {participant.checked_in_by_user?.name && String(participant.checked_in_by) !== String(participant.user_id)
+                              ? `Checked in by ${participant.checked_in_by_user.name} at ${formatBangkokDateTime(participant.checked_in_at)}`
+                              : `Checked in at ${formatBangkokDateTime(participant.checked_in_at)}`}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge status={participant.checked_in ? 'success' : 'warning'}>
+                          {participant.checked_in ? 'Checked In' : 'Not Checked'}
+                        </Badge>
+                        {currentUserRole === 'admin' && participant.checked_in && (
+                          <Button
+                            variant="secondary"
+                            className="px-2 py-1 text-xs"
+                            onClick={() => handleRemoveParticipant(participant.id)}
+                            loading={participantActionLoading}
+                            disabled={participantActionLoading}
+                          >
+                            Remove
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   ))
                 )}
@@ -1131,17 +1389,17 @@ export const EventDetailPage = () => {
       >
         <div className="space-y-4">
           <Input
+            label="Description"
+            value={expenseForm.description}
+            onChange={(e) => setExpenseForm((prev) => ({ ...prev, description: e.target.value }))}
+            placeholder="What is this for?"
+          />
+          <Input
             label="Amount"
             type="number"
             value={expenseForm.amount}
             onChange={(e) => setExpenseForm((prev) => ({ ...prev, amount: e.target.value }))}
             placeholder="0.00"
-          />
-          <Input
-            label="Description"
-            value={expenseForm.description}
-            onChange={(e) => setExpenseForm((prev) => ({ ...prev, description: e.target.value }))}
-            placeholder="What is this for?"
           />
         </div>
       </Modal>

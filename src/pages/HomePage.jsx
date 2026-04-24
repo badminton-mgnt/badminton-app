@@ -11,13 +11,23 @@ import {
   logout,
   getUserProfile,
 } from '../lib/api'
-import { forgetCheckedInEvent, hasCheckedInEvent, rememberCheckedInEvent } from '../lib/checkinCache'
+import {
+  forgetCheckedInEvent,
+  forgetDismissedCheckInEvent,
+  hasCheckedInEvent,
+  hasDismissedCheckInEvent,
+  rememberCheckedInEvent,
+  rememberDismissedCheckInEvent,
+} from '../lib/checkinCache'
 import { formatVndAmount } from '../lib/currency'
 import { formatBangkokDateTime, getBangkokDateKey } from '../lib/dateTime'
 import { motion } from 'framer-motion'
 import { LogOut, Plus, Users } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { useTeam } from '../contexts/TeamContext'
+
+const CHECKIN_PAYMENT_WINDOW_DAYS = 3
+const DAY_IN_MS = 24 * 60 * 60 * 1000
 
 export const HomePage = () => {
   const navigate = useNavigate()
@@ -39,6 +49,9 @@ export const HomePage = () => {
   })
   const [todayEvent, setTodayEvent] = useState(null)
   const [todayEventCheckedIn, setTodayEventCheckedIn] = useState(false)
+  const [pendingPastCheckInEvents, setPendingPastCheckInEvents] = useState([])
+  const [pendingCheckInModalOpen, setPendingCheckInModalOpen] = useState(false)
+  const [selectedCheckInEvent, setSelectedCheckInEvent] = useState(null)
   const [upcomingCount, setUpcomingCount] = useState(0)
   const [hasUpcoming, setHasUpcoming] = useState(false)
 
@@ -83,6 +96,9 @@ export const HomePage = () => {
     if (!currentTeam) {
       setTodayEvent(null)
       setTodayEventCheckedIn(false)
+      setPendingPastCheckInEvents([])
+      setPendingCheckInModalOpen(false)
+      setSelectedCheckInEvent(null)
       setUpcomingCount(0)
       setHasUpcoming(false)
       setPaymentSummary({
@@ -113,13 +129,25 @@ export const HomePage = () => {
       const eventsData = await getEvents(currentTeam.team_id)
       const activeEvents = eventsData.filter((event) => event.status !== 'CANCELLED')
       const todayKey = getBangkokDateKey(new Date())
+      const now = Date.now()
       const todayMatch = activeEvents.find((event) => getBangkokDateKey(event.date) === todayKey)
       const upcomingEvents = activeEvents.filter((event) => getBangkokDateKey(event.date) > todayKey)
+      const pastEventsInGraceWindow = activeEvents.filter((event) => {
+        const eventTime = new Date(event.date).getTime()
+        if (!Number.isFinite(eventTime) || eventTime >= now) return false
+        return now <= eventTime + (CHECKIN_PAYMENT_WINDOW_DAYS * DAY_IN_MS)
+      })
+      const pastEventsBeyondGraceWindow = activeEvents.filter((event) => {
+        const eventTime = new Date(event.date).getTime()
+        if (!Number.isFinite(eventTime) || eventTime >= now) return false
+        return now > eventTime + (CHECKIN_PAYMENT_WINDOW_DAYS * DAY_IN_MS)
+      })
 
       setTodayEvent(todayMatch || null)
       setUpcomingCount(upcomingEvents.length)
       setHasUpcoming(upcomingEvents.length > 0)
       setTodayEventCheckedIn(todayMatch ? hasCheckedInEvent(user.id, todayMatch.id) : false)
+      setPendingPastCheckInEvents([])
 
       if (todayMatch) {
         try {
@@ -130,6 +158,7 @@ export const HomePage = () => {
 
           if (userCheckedIn) {
             rememberCheckedInEvent(user.id, todayMatch.id)
+            forgetDismissedCheckInEvent(user.id, todayMatch.id)
           } else {
             forgetCheckedInEvent(user.id, todayMatch.id)
           }
@@ -142,6 +171,76 @@ export const HomePage = () => {
           setTodayEventCheckedIn(hasCheckedInEvent(user.id, todayMatch.id))
         }
       }
+
+      const pendingCheckInEvents = []
+      if (todayMatch && !hasDismissedCheckInEvent(user.id, todayMatch.id) && !hasCheckedInEvent(user.id, todayMatch.id) && !todayEventCheckedIn) {
+        pendingCheckInEvents.push(todayMatch)
+      }
+
+      if (pastEventsInGraceWindow.length > 0) {
+        const pastEventStatuses = await Promise.all(
+          pastEventsInGraceWindow.map(async (event) => {
+            try {
+              const participants = await getEventParticipants(event.id)
+              const userCheckedIn = participants.some(
+                (participant) => String(participant.user_id) === String(user.id) && isParticipantCheckedIn(participant)
+              )
+
+              if (userCheckedIn) {
+                rememberCheckedInEvent(user.id, event.id)
+                forgetDismissedCheckInEvent(user.id, event.id)
+              } else {
+                forgetCheckedInEvent(user.id, event.id)
+              }
+
+              return { event, userCheckedIn }
+            } catch (error) {
+              console.error('Error loading past event participants:', error)
+              return { event, userCheckedIn: hasCheckedInEvent(user.id, event.id) }
+            }
+          })
+        )
+
+        const pendingPastEvents = pastEventStatuses
+          .filter((item) => !item.userCheckedIn && !hasDismissedCheckInEvent(user.id, item.event.id))
+          .map((item) => item.event)
+          .sort((a, b) => new Date(b.date) - new Date(a.date))
+
+        const pendingIds = new Set(pendingCheckInEvents.map((event) => String(event.id)))
+        pendingPastEvents.forEach((event) => {
+          if (!pendingIds.has(String(event.id))) {
+            pendingCheckInEvents.push(event)
+          }
+        })
+      }
+
+      if (pastEventsBeyondGraceWindow.length > 0) {
+        await Promise.all(
+          pastEventsBeyondGraceWindow.map(async (event) => {
+            try {
+              const participants = await getEventParticipants(event.id)
+              const userCheckedIn = participants.some(
+                (participant) => String(participant.user_id) === String(user.id) && isParticipantCheckedIn(participant)
+              )
+
+              if (userCheckedIn) {
+                rememberCheckedInEvent(user.id, event.id)
+                forgetDismissedCheckInEvent(user.id, event.id)
+              } else {
+                rememberDismissedCheckInEvent(user.id, event.id)
+                forgetCheckedInEvent(user.id, event.id)
+              }
+            } catch (error) {
+              console.error('Error loading expired event participants:', error)
+              if (!hasCheckedInEvent(user.id, event.id)) {
+                rememberDismissedCheckInEvent(user.id, event.id)
+              }
+            }
+          })
+        )
+      }
+
+      setPendingPastCheckInEvents(pendingCheckInEvents)
 
       const paymentEvent =
         todayMatch ||
@@ -184,14 +283,47 @@ export const HomePage = () => {
         const transferDirection = (direction) => String(direction || '').toUpperCase().trim()
         const isTransferConfirmed = (status) => ['CONFIRMED', 'COMPLETE', 'COMPLETED'].includes(transferStatus(status))
         const isToTreasuryDirection = (direction) => transferDirection(direction) === 'TO_TREASURY'
+        const isFromTreasuryDirection = (direction) => transferDirection(direction) === 'FROM_TREASURY'
+        const isToTreasuryTransfer = (transfer) =>
+          isToTreasuryDirection(transfer.direction) || (!transfer.direction && String(transfer.to_user_id) === String(teamTreasurerId))
+        const isFromTreasuryTransfer = (transfer) =>
+          isFromTreasuryDirection(transfer.direction) || (!transfer.direction && String(transfer.from_user_id) === String(teamTreasurerId))
 
         const userPaymentTransfers = transfersData.filter(
           (transfer) =>
             String(transfer.from_user_id) === String(user.id) &&
             String(transfer.to_user_id) === String(teamTreasurerId) &&
-            isToTreasuryDirection(transfer.direction) &&
+            isToTreasuryTransfer(transfer) &&
             isTransferConfirmed(transfer.status)
         )
+
+        const confirmedIncomingPayoutAmount = transfersData
+          .filter(
+            (transfer) =>
+              String(transfer.from_user_id) === String(teamTreasurerId) &&
+              String(transfer.to_user_id) === String(user.id) &&
+              isFromTreasuryTransfer(transfer) &&
+              isTransferConfirmed(transfer.status)
+          )
+          .reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
+
+        const confirmedOutgoingFromTreasuryAmount = transfersData
+          .filter(
+            (transfer) =>
+              String(transfer.from_user_id) === String(user.id) &&
+              isFromTreasuryTransfer(transfer) &&
+              isTransferConfirmed(transfer.status)
+          )
+          .reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
+
+        const confirmedIncomingToTreasuryAmount = transfersData
+          .filter(
+            (transfer) =>
+              String(transfer.to_user_id) === String(user.id) &&
+              isToTreasuryTransfer(transfer) &&
+              isTransferConfirmed(transfer.status)
+          )
+          .reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
 
         const settlementPaymentAmount = userPaymentTransfers.reduce(
           (sum, transfer) => sum + Number(transfer.amount || 0),
@@ -201,6 +333,7 @@ export const HomePage = () => {
         const userApprovedExpenseTotal = approvedExpenses
           .filter((expense) => String(expense.user_id) === String(user.id))
           .reduce((sum, expense) => sum + parseFloat(expense.amount), 0)
+        const isCurrentUserTreasurer = String(user.id) === String(teamTreasurerId)
         const cachedCheckedIn = hasCheckedInEvent(user.id, paymentEvent.id)
         const userIsCheckedIn = participantsData.some(
           (participant) => String(participant.user_id) === String(user.id) && isParticipantCheckedIn(participant)
@@ -208,12 +341,17 @@ export const HomePage = () => {
 
         if (participantsData.some((participant) => String(participant.user_id) === String(user.id) && isParticipantCheckedIn(participant))) {
           rememberCheckedInEvent(user.id, paymentEvent.id)
+          forgetDismissedCheckInEvent(user.id, paymentEvent.id)
         } else {
           forgetCheckedInEvent(user.id, paymentEvent.id)
         }
 
+        const userContributionAmount = isCurrentUserTreasurer
+          ? userApprovedExpenseTotal + confirmedOutgoingFromTreasuryAmount - confirmedIncomingToTreasuryAmount
+          : settlementPaymentAmount + userApprovedExpenseTotal - confirmedIncomingPayoutAmount
+
         const balance = userIsCheckedIn
-          ? settlementPaymentAmount + userApprovedExpenseTotal - share
+          ? userContributionAmount - share
           : 0
 
         if (!userIsCheckedIn) {
@@ -271,30 +409,66 @@ export const HomePage = () => {
 
   const handleTodayEventClick = () => {
     if (!todayEvent) return
+    handleEventCheckInClick(todayEvent, todayEventCheckedIn)
+  }
 
-    if (todayEventCheckedIn) {
-      navigate(`/event/${todayEvent.id}`)
+  const handleEventCheckInClick = (event, alreadyCheckedIn = false) => {
+    if (!event) return
+
+    if (alreadyCheckedIn) {
+      navigate(`/event/${event.id}`)
       return
     }
 
+    setSelectedCheckInEvent(event)
     setCheckInModalOpen(true)
   }
 
-  const handleConfirmCheckIn = async () => {
-    if (!todayEvent) return
+  const handleDismissCheckIn = (eventToDismiss) => {
+    if (!eventToDismiss) return
+
+    rememberDismissedCheckInEvent(user.id, eventToDismiss.id)
+    forgetCheckedInEvent(user.id, eventToDismiss.id)
+
+    if (todayEvent && eventToDismiss.id === todayEvent.id) {
+      setTodayEventCheckedIn(false)
+    }
+
+    setPendingPastCheckInEvents((prev) => prev.filter((event) => event.id !== eventToDismiss.id))
+
+    if (selectedCheckInEvent && selectedCheckInEvent.id === eventToDismiss.id) {
+      setCheckInModalOpen(false)
+      setSelectedCheckInEvent(null)
+    }
+  }
+
+  const handleCheckInForEvent = async (eventToCheckIn, navigateAfterCheckIn = false) => {
+    if (!eventToCheckIn) return
 
     try {
       setCheckInLoading(true)
-      await checkinParticipant(todayEvent.id, user.id)
-      rememberCheckedInEvent(user.id, todayEvent.id)
-      setTodayEventCheckedIn(true)
+      await checkinParticipant(eventToCheckIn.id, user.id)
+      rememberCheckedInEvent(user.id, eventToCheckIn.id)
+      forgetDismissedCheckInEvent(user.id, eventToCheckIn.id)
+      if (todayEvent && eventToCheckIn.id === todayEvent.id) {
+        setTodayEventCheckedIn(true)
+      }
+      setPendingPastCheckInEvents((prev) => prev.filter((event) => event.id !== eventToCheckIn.id))
       setCheckInModalOpen(false)
-      navigate(`/event/${todayEvent.id}`)
+      setSelectedCheckInEvent(null)
+      if (navigateAfterCheckIn) {
+        navigate(`/event/${eventToCheckIn.id}`)
+      }
     } catch (error) {
       console.error('Check-in error:', error)
     } finally {
       setCheckInLoading(false)
     }
+  }
+
+  const handleConfirmCheckIn = async () => {
+    if (!selectedCheckInEvent) return
+    await handleCheckInForEvent(selectedCheckInEvent, true)
   }
 
   const handleJoinTeam = async (teamId) => {
@@ -404,6 +578,28 @@ export const HomePage = () => {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
         >
+          {pendingPastCheckInEvents.length > 0 && (
+            <Card className="mb-3 border border-warning-300 bg-warning-50">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase text-warning-900">
+                    Check-in Warning
+                  </p>
+                  <p className="text-sm text-warning-900">
+                    {`You have ${pendingPastCheckInEvents.length} event${pendingPastCheckInEvents.length > 1 ? 's' : ''} pending check-in.`}
+                  </p>
+                </div>
+                <Button
+                  variant="secondary"
+                  className="border border-warning-300"
+                  onClick={() => setPendingCheckInModalOpen(true)}
+                >
+                  Review
+                </Button>
+              </div>
+            </Card>
+          )}
+
           <h2 className="text-sm font-semibold text-neutral-600 mb-3 uppercase">
             Today&apos;s Team Event
           </h2>
@@ -533,16 +729,30 @@ export const HomePage = () => {
 
       <Modal
         isOpen={checkInModalOpen}
-        onClose={() => setCheckInModalOpen(false)}
+        onClose={() => {
+          setCheckInModalOpen(false)
+          setSelectedCheckInEvent(null)
+        }}
         title="Confirm Check-In"
         footer={
           <>
             <Button
               variant="secondary"
-              onClick={() => setCheckInModalOpen(false)}
+              onClick={() => {
+                setCheckInModalOpen(false)
+                setSelectedCheckInEvent(null)
+              }}
               className="flex-1"
             >
-              Not Now
+              Cancel
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => handleDismissCheckIn(selectedCheckInEvent)}
+              className="flex-1"
+              disabled={!selectedCheckInEvent || checkInLoading}
+            >
+              I Didn&apos;t Join
             </Button>
             <Button
               onClick={handleConfirmCheckIn}
@@ -556,22 +766,74 @@ export const HomePage = () => {
       >
         <div className="space-y-3">
           <p className="text-sm text-neutral-700">
-            Check in to join today&apos;s event and open its details.
+            {selectedCheckInEvent && hasDismissedCheckInEvent(user.id, selectedCheckInEvent.id)
+              ? 'You marked this event as not joined. You cannot open event details unless you check in now.'
+              : 'Check in to join this event and open its details.'}
           </p>
-          {todayEvent && (
+          {selectedCheckInEvent && (
             <div className="rounded-2xl bg-neutral-50 p-4">
-              <p className="font-semibold">{todayEvent.title}</p>
-              <p className="text-sm text-neutral-600 mt-1">{formatBangkokDateTime(todayEvent.date)}</p>
+              <p className="font-semibold">{selectedCheckInEvent.title}</p>
+              <p className="text-sm text-neutral-600 mt-1">{formatBangkokDateTime(selectedCheckInEvent.date)}</p>
               <p className="text-sm text-neutral-600">
-                {todayEvent.location || 'Location not set'}
-                {todayEvent.court_number ? ` - Court ${todayEvent.court_number}` : ''}
+                {selectedCheckInEvent.location || 'Location not set'}
+                {selectedCheckInEvent.court_number ? ` - Court ${selectedCheckInEvent.court_number}` : ''}
               </p>
             </div>
           )}
           <p className="text-xs text-neutral-500">
-            If you do not check in, you will not be charged for this event and cannot open its detail page.
+            Check in is allowed up to {CHECKIN_PAYMENT_WINDOW_DAYS} days after event date. If you do not check in, this event will not be included in your settlement.
           </p>
         </div>
+      </Modal>
+
+      <Modal
+        isOpen={pendingCheckInModalOpen}
+        onClose={() => setPendingCheckInModalOpen(false)}
+        title={`Pending Check-In (${pendingPastCheckInEvents.length})`}
+        footer={
+          <Button
+            variant="secondary"
+            onClick={() => setPendingCheckInModalOpen(false)}
+            className="w-full"
+          >
+            Close
+          </Button>
+        }
+      >
+        {pendingPastCheckInEvents.length === 0 ? (
+          <p className="text-sm text-neutral-600">No pending check-in events.</p>
+        ) : (
+          <div className="space-y-3">
+            {pendingPastCheckInEvents.map((event) => (
+              <Card key={event.id} className="border border-warning-200 bg-warning-50">
+                <div className="space-y-3">
+                  <div>
+                    <p className="font-semibold">{event.title}</p>
+                    <p className="text-sm text-neutral-600">{formatBangkokDateTime(event.date)}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="secondary"
+                      className="flex-1"
+                      onClick={() => handleDismissCheckIn(event)}
+                      disabled={checkInLoading}
+                    >
+                      I Didn&apos;t Join
+                    </Button>
+                    <Button
+                      className="flex-1"
+                      onClick={() => handleCheckInForEvent(event)}
+                      loading={checkInLoading}
+                      disabled={checkInLoading}
+                    >
+                      Check In
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
       </Modal>
 
       <Modal

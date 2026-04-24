@@ -447,7 +447,7 @@ export const deleteEvent = async (eventId) => {
 }
 
 // Participant functions
-export const checkinParticipant = async (eventId, userId) => {
+export const checkinParticipant = async (eventId, userId, checkedInByUserId = userId) => {
   const { data: existingRows, error: selectError } = await supabase
     .from('event_participants')
     .select('id, checked_in')
@@ -463,6 +463,7 @@ export const checkinParticipant = async (eventId, userId) => {
       .update({
         checked_in: true,
         checked_in_at: new Date().toISOString(),
+        checked_in_by: checkedInByUserId,
       })
       .eq('id', existingRows[0].id)
       .select()
@@ -478,6 +479,7 @@ export const checkinParticipant = async (eventId, userId) => {
       user_id: userId,
       checked_in: true,
       checked_in_at: new Date().toISOString(),
+      checked_in_by: checkedInByUserId,
     }])
     .select()
 
@@ -488,11 +490,50 @@ export const checkinParticipant = async (eventId, userId) => {
 export const getEventParticipants = async (eventId) => {
   const { data: participants, error: participantsError } = await supabase
     .from('event_participants')
-    .select('id, event_id, user_id, checked_in, checked_in_at')
+    .select('id, event_id, user_id, checked_in, checked_in_at, checked_in_by')
     .eq('event_id', eventId)
 
   if (participantsError) throw participantsError
-  return attachUsersById(participants, 'id, name')
+  const participantsWithUsers = await attachUsersById(participants, 'id, name')
+
+  if (!participantsWithUsers.length) {
+    return participantsWithUsers
+  }
+
+  const checkedInByUserIds = [
+    ...new Set(
+      participantsWithUsers
+        .map((row) => row.checked_in_by)
+        .filter(Boolean)
+    ),
+  ]
+
+  if (checkedInByUserIds.length === 0) {
+    return participantsWithUsers
+  }
+
+  const { data: checkedInByUsers, error: checkedInByUsersError } = await supabase
+    .from('users')
+    .select('id, name')
+    .in('id', checkedInByUserIds)
+
+  if (checkedInByUsersError) throw checkedInByUsersError
+
+  const checkedInByUsersMap = new Map((checkedInByUsers || []).map((user) => [String(user.id), user]))
+
+  return participantsWithUsers.map((row) => ({
+    ...row,
+    checked_in_by_user: checkedInByUsersMap.get(String(row.checked_in_by)) || null,
+  }))
+}
+
+export const removeEventParticipant = async (participantId) => {
+  const { error } = await supabase
+    .from('event_participants')
+    .delete()
+    .eq('id', participantId)
+
+  if (error) throw error
 }
 
 export const getCheckedInCount = async (eventId) => {
