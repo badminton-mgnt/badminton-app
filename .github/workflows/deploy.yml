@@ -12,7 +12,22 @@ permissions:
   id-token: write
 
 jobs:
+  migrate-db:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PostgreSQL client
+        if: ${{ env.SUPABASE_DB_URL != '' }}
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Apply schema.sql to production database
+        if: ${{ env.SUPABASE_DB_URL != '' }}
+        run: psql "$SUPABASE_DB_URL" -f supabase/schema.sql
+
   build:
+    needs: migrate-db
+    if: ${{ always() && (needs.migrate-db.result == 'success' || needs.migrate-db.result == 'skipped') }}
     runs-on: ubuntu-latest
 
     steps:
