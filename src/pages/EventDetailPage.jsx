@@ -462,6 +462,9 @@ export const EventDetailPage = () => {
           return
         }
 
+        const isTreasurerSelfPayout =
+          String(teamTreasurerId).toLowerCase() === String(paymentTarget.user_id).toLowerCase()
+
         await createPaymentTransfer({
           team_id: event.team_id,
           event_id: eventId,
@@ -469,7 +472,8 @@ export const EventDetailPage = () => {
           to_user_id: paymentTarget.user_id,
           amount: payoutTransferAmount,
           direction: 'FROM_TREASURY',
-          status: 'WAITING_CONFIRM',
+          status: isTreasurerSelfPayout ? 'CONFIRMED' : 'WAITING_CONFIRM',
+          confirmed_at: isTreasurerSelfPayout ? new Date().toISOString() : null,
         })
       } else {
         setPaymentModalOpen(false)
@@ -687,7 +691,7 @@ export const EventDetailPage = () => {
         payoutNeeded: Math.max(settlement.normalizedBalance, 0),
         waitingTransfer: settlement.waitingIncomingPayoutTransfer,
       }))
-      .filter((member) => String(member.user_id) !== String(treasuryUserId) && member.payoutNeeded > 0)
+      .filter((member) => member.payoutNeeded > 0)
     : []
 
   const payoutTransferAmount = paymentTarget
@@ -803,11 +807,15 @@ export const EventDetailPage = () => {
   }
   const activeSettlementHelp = settlementHelpKey ? settlementHelpContent[settlementHelpKey] : null
 
+  const allParticipantsSettled = participantSettlements.every(
+    ({ settlement }) => settlement.normalizedBalance === 0
+  )
+
   const isSettlementReadyToComplete =
     isTeamTreasurer &&
     canRunSettlement &&
     waitingConfirmationPayments.length === 0 &&
-    participantSettlements.every(({ settlement }) => settlement.normalizedBalance === 0)
+    allParticipantsSettled
 
   const handleMarkJoiningClosed = async () => {
     if (!canCloseJoining || isJoiningClosed) {
@@ -1159,7 +1167,7 @@ export const EventDetailPage = () => {
                   )}
                   {isTeamTreasurer && normalizedBalance > 0 && (
                     <p className="mt-2 text-xs text-neutral-600">
-                      {`Members still owe đ${formatVndAmount(normalizedBalance)} to the treasury.`}
+                      {`Treasury needs to reimburse you đ${formatVndAmount(normalizedBalance)}.`}
                     </p>
                   )}
                   {isTeamTreasurer && normalizedBalance === 0 && canRunSettlement && confirmedToTreasuryAmount > 0 && (
@@ -1410,7 +1418,10 @@ export const EventDetailPage = () => {
                       >
                         <div className="flex items-center justify-between gap-2">
                           <div>
-                            <p className="text-sm font-semibold">{member.name}</p>
+                            <p className="text-sm font-semibold">
+                              {member.name}
+                              {String(member.user_id) === String(treasuryUserId) ? ' (Treasurer)' : ''}
+                            </p>
                             <p className="text-xs text-neutral-600">{`Need payout: đ ${formatVndAmount(member.payoutNeeded)}`}</p>
                           </div>
                           <Badge status={member.waitingTransfer ? 'warning' : 'default'}>

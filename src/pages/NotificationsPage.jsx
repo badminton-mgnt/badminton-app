@@ -22,6 +22,8 @@ const NOTIFICATION_TYPE_LABELS = {
   EXPENSE_REJECTED: 'Expense',
   PAYMENT_CONFIRMED_BY_RECEIVER: 'Payment',
   PAYMENT_REJECTED_BY_RECEIVER: 'Payment',
+  EVENT_SETTLEMENT_PAYMENT_REQUIRED: 'Settlement',
+  EVENT_SETTLEMENT_PAYOUT_AVAILABLE: 'Settlement',
 }
 
 const parseNotificationDate = (value) => {

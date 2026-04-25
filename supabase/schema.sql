@@ -1286,7 +1286,7 @@ begin
     select t.name into v_team_name from public.teams t where t.id = v_team_id;
     v_type := 'EVENT_SETTLEMENT_COMPLETED';
     v_title := 'Settlement Completed';
-    v_message := format('Settlement for event "%s" in team "%s" is now complete.', coalesce(new.title, 'an event'), coalesce(v_team_name, 'Unknown Team'));
+    v_message := format('Settlement for event "%s" in "%s" is now complete.', coalesce(new.title, 'an event'), coalesce(v_team_name, 'Unknown Team'));
     v_link := '/event/' || new.id::text;
     v_event_id := new.id;
   elsif tg_op = 'DELETE' then
@@ -1339,6 +1339,132 @@ create trigger trg_notify_event_deleted
 before delete on public.events
 for each row
 execute function public.notify_team_for_event_changes();
+
+create or replace function public.notify_settlement_on_expense_lock()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_actor_id uuid;
+  v_actor_name text;
+  v_team_name text;
+  v_checked_in_count integer;
+  v_total_expense numeric := 0;
+  v_share numeric := 0;
+  v_participant record;
+  v_user_expense_total numeric := 0;
+  v_balance numeric := 0;
+  v_amount numeric := 0;
+  v_type text;
+  v_title text;
+  v_message text;
+begin
+  if tg_op <> 'UPDATE' then
+    return new;
+  end if;
+
+  if old.expenses_closed_at is not null or new.expenses_closed_at is null then
+    return new;
+  end if;
+
+  v_actor_id := coalesce(new.expenses_closed_by, auth.uid());
+
+  select u.name into v_actor_name
+  from public.users u
+  where u.id = v_actor_id;
+
+  select t.name into v_team_name
+  from public.teams t
+  where t.id = new.team_id;
+
+  select count(*)::int into v_checked_in_count
+  from public.event_participants ep
+  where ep.event_id = new.id
+    and coalesce(ep.checked_in, false) = true;
+
+  if coalesce(v_checked_in_count, 0) <= 0 then
+    return new;
+  end if;
+
+  select coalesce(sum(e.amount), 0) into v_total_expense
+  from public.expenses e
+  where e.event_id = new.id
+    and e.team_id = new.team_id
+    and e.status = 'APPROVED';
+
+  v_share := round(v_total_expense / v_checked_in_count::numeric, 2);
+
+  for v_participant in
+    select ep.user_id
+    from public.event_participants ep
+    where ep.event_id = new.id
+      and coalesce(ep.checked_in, false) = true
+  loop
+    select coalesce(sum(e.amount), 0) into v_user_expense_total
+    from public.expenses e
+    where e.event_id = new.id
+      and e.team_id = new.team_id
+      and e.user_id = v_participant.user_id
+      and e.status = 'APPROVED';
+
+    v_balance := v_user_expense_total - v_share;
+
+    if abs(v_balance) < 1 then
+      continue;
+    end if;
+
+    v_amount := round(abs(v_balance), 0);
+
+    if v_balance < 0 then
+      v_type := 'EVENT_SETTLEMENT_PAYMENT_REQUIRED';
+      v_title := 'Settlement Payment Required';
+      v_message := format(
+        'Expenses are locked for event "%s" in "%s". You need to transfer đ %s to treasury.',
+        coalesce(new.title, 'an event'),
+        coalesce(v_team_name, 'Unknown Team'),
+        to_char(v_amount::numeric, 'FM999,999,999,990')
+      );
+    else
+      v_type := 'EVENT_SETTLEMENT_PAYOUT_AVAILABLE';
+      v_title := 'Settlement Payout Available';
+      v_message := format(
+        'Expenses are locked for event "%s" in "%s". You will receive đ %s from treasury.',
+        coalesce(new.title, 'an event'),
+        coalesce(v_team_name, 'Unknown Team'),
+        to_char(v_amount::numeric, 'FM999,999,999,990')
+      );
+    end if;
+
+    perform public.create_notification(
+      v_participant.user_id,
+      v_actor_id,
+      v_type,
+      v_title,
+      v_message,
+      '/event/' || new.id::text,
+      jsonb_build_object(
+        'event_id', new.id,
+        'team_id', new.team_id,
+        'share', v_share,
+        'total_expense', v_total_expense,
+        'checked_in_count', v_checked_in_count,
+        'settlement_amount', v_amount,
+        'direction', case when v_balance < 0 then 'TO_TREASURY' else 'FROM_TREASURY' end
+      )
+    );
+  end loop;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_notify_settlement_on_expense_lock on public.events;
+create trigger trg_notify_settlement_on_expense_lock
+after update on public.events
+for each row
+execute function public.notify_settlement_on_expense_lock();
 
 create or replace function public.notify_team_deleted()
 returns trigger
