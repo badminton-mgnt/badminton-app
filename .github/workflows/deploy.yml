@@ -24,6 +24,9 @@ jobs:
       - name: Apply schema.sql to production database
         if: ${{ env.SUPABASE_DB_URL != '' }}
         run: psql "$SUPABASE_DB_URL" -f supabase/schema.sql
+      - name: Apply triggers.sql to production database
+        if: ${{ env.SUPABASE_DB_URL != '' }}
+        run: psql "$SUPABASE_DB_URL" -f supabase/triggers.sql
 
   build:
     needs: migrate-db
