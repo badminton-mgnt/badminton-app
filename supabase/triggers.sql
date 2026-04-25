@@ -3,7 +3,15 @@ CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
   INSERT INTO public.users (id, name)
-  VALUES (new.id, COALESCE(new.user_metadata->>'name', new.email))
+  VALUES (
+    new.id,
+    COALESCE(
+      new.raw_user_meta_data->>'name',
+      new.raw_user_meta_data->>'full_name',
+      split_part(COALESCE(new.email, ''), '@', 1),
+      'User'
+    )
+  )
   ON CONFLICT (id) DO NOTHING;
   RETURN new;
 END;
