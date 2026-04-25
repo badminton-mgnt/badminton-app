@@ -17,6 +17,7 @@ import {
   getUserProfile,
   updateExpenseStatus,
   updateEvent,
+  updatePaymentTransfer,
 } from '../lib/api'
 import {
   forgetCheckedInEvent,
@@ -65,7 +66,9 @@ export const EventDetailPage = () => {
   const [selectedMembersToAdd, setSelectedMembersToAdd] = useState([])
   const [participantActionLoading, setParticipantActionLoading] = useState(false)
   const [joiningClosing, setJoiningClosing] = useState(false)
+  const [expenseClosing, setExpenseClosing] = useState(false)
   const [settlementCompleting, setSettlementCompleting] = useState(false)
+  const [settlementHelpKey, setSettlementHelpKey] = useState(null)
   const [eventForm, setEventForm] = useState({
     title: '',
     date: '',
@@ -79,6 +82,107 @@ export const EventDetailPage = () => {
 
   const isParticipantCheckedIn = (participant) =>
     Boolean(participant?.checked_in)
+
+  const syncTreasurerContributionTransfer = async ({
+    eventData,
+    participantsData,
+    expensesData,
+    transfersData,
+    treasuryUserId,
+  }) => {
+    const normalizedEventStatus = String(eventData?.status || '').toUpperCase()
+    const canSyncSettlement = ['FINALIZED', 'COMPLETED'].includes(normalizedEventStatus)
+
+    if (!canSyncSettlement || !treasuryUserId) {
+      return transfersData
+    }
+
+    const checkedInParticipants = (participantsData || []).filter((participant) => isParticipantCheckedIn(participant))
+    const treasurerCheckedIn = checkedInParticipants.some(
+      (participant) => String(participant.user_id) === String(treasuryUserId)
+    )
+
+    if (!treasurerCheckedIn) {
+      return transfersData
+    }
+
+    const approvedExpenses = (expensesData || []).filter((expense) => expense.status === 'APPROVED')
+    const totalExpense = approvedExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0)
+    const treasurerShareAmount = checkedInParticipants.length > 0
+      ? Math.round((totalExpense / checkedInParticipants.length) * 100) / 100
+      : 0
+
+    const treasurerApprovedExpenseTotal = approvedExpenses
+      .filter((expense) => String(expense.user_id) === String(treasuryUserId))
+      .reduce((sum, expense) => sum + Number(expense.amount || 0), 0)
+    const treasurerPreSettlementBalance = treasurerApprovedExpenseTotal - treasurerShareAmount
+    const desiredDirection = treasurerPreSettlementBalance > 0
+      ? 'FROM_TREASURY'
+      : treasurerPreSettlementBalance < 0
+      ? 'TO_TREASURY'
+      : null
+    const desiredAmount = Math.round(Math.abs(treasurerPreSettlementBalance) * 100) / 100
+
+    const implicitTransfer = (transfersData || []).find(
+      (transfer) =>
+        String(transfer.from_user_id) === String(treasuryUserId) &&
+        String(transfer.to_user_id) === String(treasuryUserId) &&
+        ['FROM_TREASURY', 'TO_TREASURY'].includes(String(transfer.direction || '').toUpperCase())
+    )
+
+    if (!desiredDirection || desiredAmount <= 0.01) {
+      if (!implicitTransfer) {
+        return transfersData
+      }
+
+      const shouldResetAmount = Math.abs(Number(implicitTransfer.amount || 0)) >= 0.01
+      const shouldUpdateStatus = String(implicitTransfer.status || '').toUpperCase() !== 'CONFIRMED'
+
+      if (!shouldResetAmount && !shouldUpdateStatus) {
+        return transfersData
+      }
+
+      await updatePaymentTransfer(implicitTransfer.id, {
+        amount: 0,
+        status: 'CONFIRMED',
+        confirmed_at: implicitTransfer.confirmed_at || new Date().toISOString(),
+      })
+
+      return getEventPaymentTransfers(eventId)
+    }
+
+    if (implicitTransfer) {
+      const shouldUpdateAmount = Math.abs(Number(implicitTransfer.amount || 0) - desiredAmount) >= 0.01
+      const shouldUpdateDirection = String(implicitTransfer.direction || '').toUpperCase() !== desiredDirection
+      const shouldUpdateStatus = String(implicitTransfer.status || '').toUpperCase() !== 'CONFIRMED'
+
+      if (!shouldUpdateAmount && !shouldUpdateDirection && !shouldUpdateStatus) {
+        return transfersData
+      }
+
+      await updatePaymentTransfer(implicitTransfer.id, {
+        amount: desiredAmount,
+        direction: desiredDirection,
+        status: 'CONFIRMED',
+        confirmed_at: implicitTransfer.confirmed_at || new Date().toISOString(),
+      })
+
+      return getEventPaymentTransfers(eventId)
+    }
+
+    await createPaymentTransfer({
+      team_id: eventData.team_id,
+      event_id: eventId,
+      from_user_id: treasuryUserId,
+      to_user_id: treasuryUserId,
+      amount: desiredAmount,
+      direction: desiredDirection,
+      status: 'CONFIRMED',
+      confirmed_at: new Date().toISOString(),
+    })
+
+    return getEventPaymentTransfers(eventId)
+  }
 
   const loadData = async () => {
     try {
@@ -98,7 +202,7 @@ export const EventDetailPage = () => {
       const eventData = eventResult.value
       const participantsData = participantsResult.status === 'fulfilled' ? participantsResult.value : null
       const expensesData = expensesResult.status === 'fulfilled' ? expensesResult.value : null
-      const transfersData = transfersResult.status === 'fulfilled' ? transfersResult.value : null
+      let transfersData = transfersResult.status === 'fulfilled' ? transfersResult.value : null
       const profileData = profileResult.status === 'fulfilled' ? profileResult.value : null
 
       setEvent(eventData)
@@ -130,6 +234,17 @@ export const EventDetailPage = () => {
         setTeamMemberCount(0)
         setTeamTreasurerId(null)
       }
+
+      if (eventData?.team_id && participantsData && expensesData && transfersData && treasuryUserId) {
+        transfersData = await syncTreasurerContributionTransfer({
+          eventData,
+          participantsData,
+          expensesData,
+          transfersData,
+          treasuryUserId,
+        })
+      }
+
       if (participantsData) {
         setParticipants(participantsData)
         const userCheckedIn = participantsData.some(
@@ -192,8 +307,13 @@ export const EventDetailPage = () => {
     }
   }
 
+  const handleSectionTabClick = (nextTab) => {
+    setActiveTab(nextTab)
+    loadData()
+  }
+
   const handleOpenTreasuryTransferModal = async () => {
-    if (!isJoiningClosed) {
+    if (!canRunSettlement) {
       return
     }
 
@@ -231,7 +351,7 @@ export const EventDetailPage = () => {
   }
 
   const handleOpenPayoutModal = async (target) => {
-    if (!isJoiningClosed) {
+    if (!canRunSettlement) {
       return
     }
 
@@ -260,7 +380,9 @@ export const EventDetailPage = () => {
   const normalizedEventStatus = String(event?.status || '').toUpperCase()
   const isSettlementCompleted = normalizedEventStatus === 'COMPLETED'
   const isJoiningClosed = ['FINALIZED', 'COMPLETED'].includes(normalizedEventStatus)
+  const isExpenseAddingClosed = Boolean(event?.expenses_closed_at) || isSettlementCompleted
   const canCloseJoining = ['admin', 'sub_admin'].includes(currentUserRole) || isTeamTreasurer
+  const canCloseExpenseAdding = isTeamTreasurer && isJoiningClosed && !isExpenseAddingClosed && !isSettlementCompleted
 
   const eventStartAtMs = event?.date ? new Date(event.date).getTime() : Number.NaN
   const hasValidEventStartAt = Number.isFinite(eventStartAtMs)
@@ -376,7 +498,7 @@ export const EventDetailPage = () => {
   }
 
   const handleCreateExpense = async () => {
-    if (!isJoiningClosed) {
+    if (!isJoiningClosed || isExpenseAddingClosed) {
       setExpenseModalOpen(false)
       return
     }
@@ -402,7 +524,7 @@ export const EventDetailPage = () => {
   }
 
   const handleSavePayment = async () => {
-    if (!isJoiningClosed) {
+    if (!canRunSettlement) {
       setPaymentModalOpen(false)
       return
     }
@@ -518,7 +640,7 @@ export const EventDetailPage = () => {
   const checkedInCount = participants.filter((participant) => isParticipantCheckedIn(participant)).length
   const approvedExpenses = expenses.filter((expense) => expense.status === 'APPROVED')
   const totalExpense = approvedExpenses.reduce((sum, expense) => sum + parseFloat(expense.amount), 0)
-  const canRunSettlement = isJoiningClosed
+  const canRunSettlement = isJoiningClosed && isExpenseAddingClosed
   const share = canRunSettlement && checkedInCount > 0 ? Math.round((totalExpense / checkedInCount) * 100) / 100 : 0
   const userShare = isCheckedIn ? share : 0
   const treasuryUserId = teamTreasurerId
@@ -532,29 +654,91 @@ export const EventDetailPage = () => {
     isToTreasuryDirection(transfer.direction) || (!transfer.direction && String(transfer.to_user_id) === String(treasuryUserId))
   const isFromTreasuryTransfer = (transfer) =>
     isFromTreasuryDirection(transfer.direction) || (!transfer.direction && String(transfer.from_user_id) === String(treasuryUserId))
+  const getParticipantSettlement = (participantUserId, participantCheckedIn = true) => {
+    if (!participantCheckedIn || !canRunSettlement) {
+      return {
+        approvedExpenseTotal: 0,
+        confirmedPaidToTreasury: 0,
+        confirmedReimbursedFromTreasury: 0,
+        waitingToTreasuryAmount: 0,
+        latestWaitingToTreasuryTransfer: null,
+        waitingIncomingPayoutTransfer: null,
+        preSettlementBalance: 0,
+        normalizedPreSettlementBalance: 0,
+        contributionAmount: 0,
+        balance: 0,
+        normalizedBalance: 0,
+      }
+    }
 
-  const userToTreasuryTransfers = paymentTransfers.filter(
-    (transfer) =>
-      String(transfer.from_user_id) === String(user.id) &&
-      String(transfer.to_user_id) === String(treasuryUserId) &&
-      isToTreasuryTransfer(transfer)
-  )
+    const approvedExpenseTotal = approvedExpenses
+      .filter((expense) => String(expense.user_id) === String(participantUserId))
+      .reduce((sum, expense) => sum + Number(expense.amount || 0), 0)
 
-  const confirmedUserToTreasuryAmount = userToTreasuryTransfers
-    .filter((transfer) => isTransferConfirmed(transfer.status))
-    .reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
+    const confirmedPaidToTreasury = paymentTransfers
+      .filter(
+        (transfer) =>
+          String(transfer.from_user_id) === String(participantUserId) &&
+          String(transfer.to_user_id) === String(treasuryUserId) &&
+          isToTreasuryTransfer(transfer) &&
+          isTransferConfirmed(transfer.status)
+      )
+      .reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
 
-  const waitingUserToTreasuryAmount = userToTreasuryTransfers
-    .filter((transfer) => isTransferWaiting(transfer.status))
-    .reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
+    const waitingToTreasuryTransfers = paymentTransfers.filter(
+      (transfer) =>
+        String(transfer.from_user_id) === String(participantUserId) &&
+        String(transfer.to_user_id) === String(treasuryUserId) &&
+        isToTreasuryTransfer(transfer) &&
+        isTransferWaiting(transfer.status)
+    )
 
-  const latestWaitingUserToTreasuryTransfer = userToTreasuryTransfers.find((transfer) => isTransferWaiting(transfer.status))
+    const confirmedReimbursedFromTreasury = paymentTransfers
+      .filter(
+        (transfer) =>
+          String(transfer.from_user_id) === String(treasuryUserId) &&
+          String(transfer.to_user_id) === String(participantUserId) &&
+          isFromTreasuryTransfer(transfer) &&
+          isTransferConfirmed(transfer.status)
+      )
+      .reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
 
-  const userApprovedExpenseTotal = approvedExpenses
-    .filter((expense) => String(expense.user_id) === String(user.id))
-    .reduce((sum, expense) => sum + parseFloat(expense.amount), 0)
+    const waitingIncomingPayoutTransfer = paymentTransfers.find(
+      (transfer) =>
+        String(transfer.from_user_id) === String(treasuryUserId) &&
+        String(transfer.to_user_id) === String(participantUserId) &&
+        isFromTreasuryTransfer(transfer) &&
+        isTransferWaiting(transfer.status)
+    ) || null
+
+    const preSettlementBalance = approvedExpenseTotal - share
+    const normalizedPreSettlementBalance = Math.abs(preSettlementBalance) < 1.0 ? 0 : preSettlementBalance
+    const contributionAmount = approvedExpenseTotal + confirmedPaidToTreasury - confirmedReimbursedFromTreasury
+    const balance = preSettlementBalance + confirmedPaidToTreasury - confirmedReimbursedFromTreasury
+    const normalizedBalance = Math.abs(balance) < 1.0 ? 0 : balance
+
+    return {
+      approvedExpenseTotal,
+      confirmedPaidToTreasury,
+      confirmedReimbursedFromTreasury,
+      waitingToTreasuryAmount: waitingToTreasuryTransfers.reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0),
+      latestWaitingToTreasuryTransfer: waitingToTreasuryTransfers[0] || null,
+      waitingIncomingPayoutTransfer,
+      preSettlementBalance,
+      normalizedPreSettlementBalance,
+      contributionAmount,
+      balance,
+      normalizedBalance,
+    }
+  }
+
+  const currentUserSettlement = getParticipantSettlement(user.id, isCheckedIn)
+  const confirmedUserToTreasuryAmount = currentUserSettlement.confirmedPaidToTreasury
+  const waitingUserToTreasuryAmount = currentUserSettlement.waitingToTreasuryAmount
+  const latestWaitingUserToTreasuryTransfer = currentUserSettlement.latestWaitingToTreasuryTransfer
+  const userApprovedExpenseTotal = currentUserSettlement.approvedExpenseTotal
   const transferAmount = canRunSettlement
-    ? Math.max(userShare - userApprovedExpenseTotal - confirmedUserToTreasuryAmount, 0)
+    ? Math.max(-currentUserSettlement.balance, 0)
     : 0
 
   const userPaymentStatus =
@@ -566,43 +750,8 @@ export const EventDetailPage = () => {
       ? 'waiting_confirm'
       : 'pending'
 
-  const incomingPayoutTransfers = paymentTransfers.filter(
-    (transfer) =>
-      String(transfer.from_user_id) === String(treasuryUserId) &&
-      String(transfer.to_user_id) === String(user.id) &&
-      isFromTreasuryTransfer(transfer)
-  )
-
-  const confirmedIncomingPayoutAmount = incomingPayoutTransfers
-    .filter((transfer) => isTransferConfirmed(transfer.status))
-    .reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
-
-  const confirmedOutgoingFromTreasuryAmount = paymentTransfers
-    .filter(
-      (transfer) =>
-        String(transfer.from_user_id) === String(user.id) &&
-        isFromTreasuryTransfer(transfer) &&
-        isTransferConfirmed(transfer.status)
-    )
-    .reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
-
-  const confirmedIncomingToTreasuryAmount = paymentTransfers
-    .filter(
-      (transfer) =>
-        String(transfer.to_user_id) === String(user.id) &&
-        isToTreasuryTransfer(transfer) &&
-        isTransferConfirmed(transfer.status)
-    )
-    .reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
-
-  const isCurrentUserTreasurer = String(user.id) === String(treasuryUserId)
-  const userContributionAmount = isCurrentUserTreasurer
-    ? userApprovedExpenseTotal + confirmedOutgoingFromTreasuryAmount - confirmedIncomingToTreasuryAmount
-    : confirmedUserToTreasuryAmount + userApprovedExpenseTotal - confirmedIncomingPayoutAmount
-
-  const userPaidTotal = userContributionAmount
-  const balance = isCheckedIn ? userContributionAmount - share : 0
-  const normalizedBalance = Math.abs(balance) < 1.0 ? 0 : balance
+  const confirmedIncomingPayoutAmount = currentUserSettlement.confirmedReimbursedFromTreasury
+  const normalizedBalance = currentUserSettlement.normalizedBalance
 
   const waitingConfirmationPayments = paymentTransfers.filter(
     (transfer) =>
@@ -611,56 +760,24 @@ export const EventDetailPage = () => {
       isTransferWaiting(transfer.status)
   )
 
-  const waitingIncomingPayoutTransfer = incomingPayoutTransfers.find((transfer) => isTransferWaiting(transfer.status))
+  const waitingIncomingPayoutTransfer = currentUserSettlement.waitingIncomingPayoutTransfer
+
+  const checkedInParticipants = participants.filter((participant) => isParticipantCheckedIn(participant))
+  const participantSettlements = canRunSettlement
+    ? checkedInParticipants.map((participant) => ({
+      participant,
+      settlement: getParticipantSettlement(participant.user_id, true),
+    }))
+    : []
 
   const membersNeedingPayout = canRunSettlement
-    ? participants
-      .filter((participant) => isParticipantCheckedIn(participant))
-      .map((participant) => {
-      const participantApprovedExpense = approvedExpenses
-        .filter((expense) => String(expense.user_id) === String(participant.user_id))
-        .reduce((sum, expense) => sum + Number(expense.amount || 0), 0)
-
-      const memberToTreasuryConfirmed = paymentTransfers
-        .filter(
-          (transfer) =>
-            String(transfer.from_user_id) === String(participant.user_id) &&
-            String(transfer.to_user_id) === String(treasuryUserId) &&
-            isToTreasuryTransfer(transfer) &&
-            isTransferConfirmed(transfer.status)
-        )
-        .reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
-
-      const treasuryToMemberConfirmed = paymentTransfers
-        .filter(
-          (transfer) =>
-            String(transfer.from_user_id) === String(treasuryUserId) &&
-            String(transfer.to_user_id) === String(participant.user_id) &&
-            isFromTreasuryTransfer(transfer) &&
-            isTransferConfirmed(transfer.status)
-        )
-        .reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
-
-      const treasuryToMemberWaiting = paymentTransfers
-        .find(
-          (transfer) =>
-            String(transfer.from_user_id) === String(treasuryUserId) &&
-            String(transfer.to_user_id) === String(participant.user_id) &&
-            isFromTreasuryTransfer(transfer) &&
-            isTransferWaiting(transfer.status)
-        )
-
-      const memberPaidTotal = memberToTreasuryConfirmed + participantApprovedExpense - treasuryToMemberConfirmed
-      const memberBalance = memberPaidTotal - share
-      const payoutNeeded = Math.max(memberBalance, 0)
-
-      return {
+    ? participantSettlements
+      .map(({ participant, settlement }) => ({
         user_id: participant.user_id,
         name: participant.users?.name || 'Member',
-        payoutNeeded,
-        waitingTransfer: treasuryToMemberWaiting || null,
-      }
-    })
+        payoutNeeded: Math.max(settlement.normalizedBalance, 0),
+        waitingTransfer: settlement.waitingIncomingPayoutTransfer,
+      }))
       .filter((member) => String(member.user_id) !== String(treasuryUserId) && member.payoutNeeded > 0)
     : []
 
@@ -685,12 +802,20 @@ export const EventDetailPage = () => {
         isTransferConfirmed(transfer.status)
     )
     .reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
+  const confirmedPayoutFromTreasuryAmount = paymentTransfers
+    .filter(
+      (transfer) =>
+        String(transfer.from_user_id) === String(treasuryUserId) &&
+        String(transfer.to_user_id) !== String(treasuryUserId) &&
+        isFromTreasuryTransfer(transfer) &&
+        isTransferConfirmed(transfer.status)
+    )
+    .reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
 
-  const treasuryApprovedExpenseTotal = approvedExpenses
-    .filter((expense) => String(expense.user_id) === String(treasuryUserId))
-    .reduce((sum, expense) => sum + Number(expense.amount || 0), 0)
-
-  const treasuryNetFund = confirmedToTreasuryAmount - confirmedFromTreasuryAmount - treasuryApprovedExpenseTotal
+  const treasurySentAmount = confirmedFromTreasuryAmount
+  const treasuryExpenseTotal = totalExpense
+  const treasuryNetFund = confirmedToTreasuryAmount - treasurySentAmount
+  const normalizedTreasuryNetFund = Math.abs(treasuryNetFund) < 1.0 ? 0 : treasuryNetFund
   const confirmedTreasuryReceivedTransfers = paymentTransfers.filter(
     (transfer) =>
       String(transfer.to_user_id) === String(treasuryUserId) &&
@@ -751,16 +876,31 @@ export const EventDetailPage = () => {
       ? 'The fund will reimburse this amount to you, so you do not need to transfer more.'
       : 'No additional transfer is needed.'
 
-  const userPayment = {
-    amount: userPaidTotal,
-    status: `Expense advanced: đ ${userApprovedExpenseTotal.toFixed(2)} | Settlement confirmed: đ ${confirmedUserToTreasuryAmount.toFixed(2)} | Reimbursed confirmed: đ ${confirmedIncomingPayoutAmount.toFixed(2)}`,
+  const settlementHelpContent = {
+    totalExpense: {
+      title: 'Total Expense',
+      description: 'The total approved expense amount for this event. This value is split across checked-in participants to calculate each person\'s share.',
+    },
+    yourShare: {
+      title: 'Your Share',
+      description: 'Your share = Total Expense / number of checked-in participants. This is your expected contribution for the event.',
+    },
+    yourExpenseTotal: {
+      title: 'Your Expense Total',
+      description: 'The total amount you personally paid and got approved as expenses in this event. It does not include settlement transfers.',
+    },
+    yourBalance: {
+      title: 'Your Balance',
+      description: 'Your remaining settlement balance after combining your share, approved expenses, transfers to treasury, and reimbursements from treasury. Negative means you still need to pay, positive means you should receive, and zero means fully settled.',
+    },
   }
+  const activeSettlementHelp = settlementHelpKey ? settlementHelpContent[settlementHelpKey] : null
+
   const isSettlementReadyToComplete =
     isTeamTreasurer &&
     canRunSettlement &&
-    Math.abs(treasuryNetFund - balance) < 0.01 &&
     waitingConfirmationPayments.length === 0 &&
-    membersNeedingPayout.length === 0
+    participantSettlements.every(({ settlement }) => settlement.normalizedBalance === 0)
 
   const handleMarkJoiningClosed = async () => {
     if (!canCloseJoining || isJoiningClosed) {
@@ -780,6 +920,32 @@ export const EventDetailPage = () => {
       console.error('Error marking joining closed:', error)
     } finally {
       setJoiningClosing(false)
+    }
+  }
+
+  const handleCloseExpenseAdding = async () => {
+    if (!canCloseExpenseAdding) {
+      return
+    }
+
+    try {
+      setExpenseClosing(true)
+      const closedAt = new Date().toISOString()
+      const updatedEvent = await updateEvent(eventId, {
+        expenses_closed_at: closedAt,
+        expenses_closed_by: user.id,
+      })
+      setEvent((prev) => ({
+        ...(prev || {}),
+        ...(updatedEvent || {}),
+        expenses_closed_at: updatedEvent?.expenses_closed_at || closedAt,
+        expenses_closed_by: updatedEvent?.expenses_closed_by || user.id,
+      }))
+      await loadData()
+    } catch (error) {
+      console.error('Error closing expense adding:', error)
+    } finally {
+      setExpenseClosing(false)
     }
   }
 
@@ -899,7 +1065,7 @@ export const EventDetailPage = () => {
                       ? 'border-primary-400 bg-primary-400 text-white shadow-sm'
                       : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50'
                   }`}
-                  onClick={() => setActiveTab('settlement')}
+                  onClick={() => handleSectionTabClick('settlement')}
                 >
                   Settlement
                 </button>
@@ -910,7 +1076,7 @@ export const EventDetailPage = () => {
                       ? 'border-primary-400 bg-primary-400 text-white shadow-sm'
                       : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50'
                   }`}
-                  onClick={() => setActiveTab('participants')}
+                  onClick={() => handleSectionTabClick('participants')}
                 >
                   {`Participants`}
                 </button>
@@ -921,7 +1087,7 @@ export const EventDetailPage = () => {
                       ? 'border-primary-400 bg-primary-400 text-white shadow-sm'
                       : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50'
                   }`}
-                  onClick={() => setActiveTab('expenses')}
+                  onClick={() => handleSectionTabClick('expenses')}
                 >
                   {`Expenses`}
                 </button>
@@ -933,7 +1099,7 @@ export const EventDetailPage = () => {
                         ? 'border-primary-400 bg-primary-400 text-white shadow-sm'
                         : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50'
                     }`}
-                    onClick={() => setActiveTab('treasury')}
+                    onClick={() => handleSectionTabClick('treasury')}
                   >
                     Treasury
                   </button>
@@ -971,25 +1137,88 @@ export const EventDetailPage = () => {
                 </Card>
               )}
 
+              {isJoiningClosed && !isExpenseAddingClosed && (
+                <Card className="mb-3 bg-warning-50 border-warning-200">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-xs text-neutral-600 uppercase">Expense Adding Status</p>
+                      <p className="text-sm font-semibold text-neutral-800">
+                        {canCloseExpenseAdding
+                          ? 'Expense adding is open. Lock it before settlement.'
+                          : isTeamTreasurer
+                          ? 'Lock expenses before settlement.'
+                          : 'Expense adding is still open. You still have time to add expenses before treasurer locks settlement.'}
+                      </p>
+                    </div>
+                    {canCloseExpenseAdding && (
+                      <Button
+                        onClick={handleCloseExpenseAdding}
+                        loading={expenseClosing}
+                        disabled={expenseClosing || isSettlementCompleted}
+                        className="w-full sm:w-auto shrink-0 whitespace-nowrap"
+                      >
+                        Lock Expenses
+                      </Button>
+                    )}
+                  </div>
+                </Card>
+              )}
+
+              {canRunSettlement && (
+                <p className="mb-3 text-xs text-neutral-600">
+                  Expense adding is closed. Settlement numbers are now locked for calculation.
+                </p>
+              )}
+
               <h2 className="text-sm font-semibold text-neutral-600 mb-3 uppercase">
                 Settlement
               </h2>
               <div className="grid grid-cols-2 gap-3">
                 <Card>
-                  <p className="text-xs text-neutral-600">Total Expense</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs text-neutral-600">Total Expense</p>
+                    <button
+                      type="button"
+                      className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-neutral-300 text-[11px] font-semibold text-neutral-600 hover:bg-neutral-100"
+                      onClick={() => setSettlementHelpKey('totalExpense')}
+                      aria-label="Explain Total Expense"
+                    >
+                      ?
+                    </button>
+                  </div>
                   <p className="text-2xl font-bold text-primary-400">{`đ ${formatVndAmount(totalExpense)}`}</p>
                 </Card>
                 <Card>
-                  <p className="text-xs text-neutral-600">Your Share</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs text-neutral-600">Your Share</p>
+                    <button
+                      type="button"
+                      className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-neutral-300 text-[11px] font-semibold text-neutral-600 hover:bg-neutral-100"
+                      onClick={() => setSettlementHelpKey('yourShare')}
+                      aria-label="Explain Your Share"
+                    >
+                      ?
+                    </button>
+                  </div>
                   <p className="text-2xl font-bold">{`đ ${formatVndAmount(userShare)}`}</p>
                 </Card>
               </div>
 
               <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <Card>
-                  <p className="text-xs text-neutral-600">Your Paid Total</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs text-neutral-600">Your Expense Total</p>
+                    <button
+                      type="button"
+                      className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-neutral-300 text-[11px] font-semibold text-neutral-600 hover:bg-neutral-100"
+                      onClick={() => setSettlementHelpKey('yourExpenseTotal')}
+                      aria-label="Explain Your Expense Total"
+                    >
+                      ?
+                    </button>
+                  </div>
                   <p className="text-2xl font-bold text-primary-400">
-                    {`đ ${formatVndAmount(userPayment ? Number(userPayment.amount) : 0)}`}
+                    {`đ ${formatVndAmount(userApprovedExpenseTotal)}`}
                   </p>
                   {!isCheckedIn && !isUpcomingEvent && (
                     <p className="text-xs text-neutral-600 mt-3">
@@ -999,12 +1228,52 @@ export const EventDetailPage = () => {
                 </Card>
 
                 <Card className={normalizedBalance < 0 ? 'bg-error-50' : 'bg-success-50'}>
-                  <p className="text-xs text-neutral-600">Your Balance</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs text-neutral-600">Your Balance</p>
+                    <button
+                      type="button"
+                      className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-neutral-300 text-[11px] font-semibold text-neutral-600 hover:bg-white/70"
+                      onClick={() => setSettlementHelpKey('yourBalance')}
+                      aria-label="Explain Your Balance"
+                    >
+                      ?
+                    </button>
+                  </div>
                   <p className={`text-2xl font-bold ${normalizedBalance < 0 ? 'text-error-800' : 'text-success-700'}`}>
                     {normalizedBalance < 0
                       ? `đ -${formatVndAmount(Math.abs(normalizedBalance))}`
                       : `đ ${formatVndAmount(normalizedBalance)}`}
                   </p>
+                  {isTeamTreasurer && normalizedBalance < 0 && (
+                    <p className="mt-2 text-xs text-neutral-600">
+                      {`You need to contribute đ${formatVndAmount(Math.abs(normalizedBalance))} to the treasury.`}
+                    </p>
+                  )}
+                  {isTeamTreasurer && normalizedBalance > 0 && (
+                    <p className="mt-2 text-xs text-neutral-600">
+                      {`Members still owe đ${formatVndAmount(normalizedBalance)} to the treasury.`}
+                    </p>
+                  )}
+                  {isTeamTreasurer && normalizedBalance === 0 && canRunSettlement && confirmedToTreasuryAmount > 0 && (
+                    <p className="mt-2 text-xs text-neutral-600">
+                      {`Members paid đ${formatVndAmount(confirmedToTreasuryAmount)} to the treasury.`}
+                    </p>
+                  )}
+                  {isTeamTreasurer && normalizedBalance === 0 && canRunSettlement && confirmedPayoutFromTreasuryAmount > 0 && (
+                    <p className="mt-2 text-xs text-neutral-600">
+                      {`The treasury paid đ${formatVndAmount(confirmedPayoutFromTreasuryAmount)} to members.`}
+                    </p>
+                  )}
+                  {normalizedBalance === 0 && canRunSettlement && isCheckedIn && !isTeamTreasurer && confirmedUserToTreasuryAmount > 0 && (
+                    <p className="mt-2 text-xs text-neutral-600">
+                      {`You paid đ${formatVndAmount(confirmedUserToTreasuryAmount)} to the treasurer.`}
+                    </p>
+                  )}
+                  {normalizedBalance === 0 && canRunSettlement && isCheckedIn && !isTeamTreasurer && confirmedIncomingPayoutAmount > 0 && (
+                    <p className="mt-2 text-xs text-neutral-600">
+                      {`The treasurer paid đ${formatVndAmount(confirmedIncomingPayoutAmount)} to you.`}
+                    </p>
+                  )}
                 </Card>
               </div>
 
@@ -1023,7 +1292,7 @@ export const EventDetailPage = () => {
                         onClick={handleOpenTreasuryTransferModal}
                         variant="secondary"
                         className="w-full border border-warning-400 sm:w-auto"
-                        disabled={!isJoiningClosed || userPaymentStatus === 'waiting_confirm' || transferAmount <= 0 || !treasuryUserId}
+                        disabled={!canRunSettlement || userPaymentStatus === 'waiting_confirm' || transferAmount <= 0 || !treasuryUserId}
                       >
                         {paymentActionLabel}
                       </Button>
@@ -1119,8 +1388,8 @@ export const EventDetailPage = () => {
               <Card className="mt-3 space-y-3">
                 <div className="flex items-center justify-between">
                   <p className="text-xs text-neutral-600 uppercase">Treasury Ledger</p>
-                  <Badge status={treasuryNetFund >= 0 ? 'success' : 'error'}>
-                    {treasuryNetFund >= 0 ? 'Healthy' : 'Negative'}
+                  <Badge status={normalizedTreasuryNetFund >= 0 ? 'success' : 'error'}>
+                    {normalizedTreasuryNetFund >= 0 ? 'Healthy' : 'Negative'}
                   </Badge>
                 </div>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -1130,19 +1399,19 @@ export const EventDetailPage = () => {
                   </div>
                   <div>
                     <p className="text-xs text-neutral-600">Treasury Sent</p>
-                    <p className="font-semibold text-error-800">{`đ ${formatVndAmount(confirmedFromTreasuryAmount)}`}</p>
+                    <p className="font-semibold text-error-800">{`đ ${formatVndAmount(treasurySentAmount)}`}</p>
                   </div>
                   <div>
                     <p className="text-xs text-neutral-600">Treasury Expense</p>
-                    <p className="font-semibold text-error-800">{`đ ${formatVndAmount(treasuryApprovedExpenseTotal)}`}</p>
+                    <p className="font-semibold text-error-800">{`đ ${formatVndAmount(treasuryExpenseTotal)}`}</p>
                   </div>
                 </div>
-                <div className={`rounded-xl p-3 ${treasuryNetFund >= 0 ? 'bg-success-50' : 'bg-error-50'}`}>
+                <div className={`rounded-xl p-3 ${normalizedTreasuryNetFund >= 0 ? 'bg-success-50' : 'bg-error-50'}`}>
                   <p className="text-xs text-neutral-600">Treasury Net Balance</p>
-                  <p className={`text-xl font-bold ${treasuryNetFund >= 0 ? 'text-success-700' : 'text-error-800'}`}>
-                    {treasuryNetFund >= 0
-                      ? `đ ${formatVndAmount(treasuryNetFund)}`
-                      : `đ -${formatVndAmount(Math.abs(treasuryNetFund))}`}
+                  <p className={`text-xl font-bold ${normalizedTreasuryNetFund >= 0 ? 'text-success-700' : 'text-error-800'}`}>
+                    {normalizedTreasuryNetFund >= 0
+                      ? `đ ${formatVndAmount(normalizedTreasuryNetFund)}`
+                      : `đ -${formatVndAmount(Math.abs(normalizedTreasuryNetFund))}`}
                   </p>
                 </div>
                 {isTeamTreasurer && (
@@ -1179,6 +1448,7 @@ export const EventDetailPage = () => {
                       confirmedTreasuryReceivedTransfers.map((transfer) => (
                         <div key={`recv-${transfer.id}`} className="rounded-lg border border-neutral-200 p-2">
                           <p className="text-sm font-semibold">{transfer.from_user?.name || 'Unknown member'}</p>
+                          <p className="text-xs text-neutral-600">{`Received by: ${transfer.to_user?.name || receiverName || 'Treasury'}`}</p>
                           <p className="text-xs text-neutral-600">{`Amount: đ ${formatVndAmount(transfer.amount)}`}</p>
                           <p className="text-xs text-neutral-500">{`Received at: ${transfer.confirmed_at ? formatBangkokDateTime(transfer.confirmed_at) : '-'}`}</p>
                         </div>
@@ -1193,8 +1463,12 @@ export const EventDetailPage = () => {
                       confirmedTreasurySentTransfers.map((transfer) => (
                         <div key={`sent-${transfer.id}`} className="rounded-lg border border-neutral-200 p-2">
                           <p className="text-sm font-semibold">{transfer.to_user?.name || 'Unknown member'}</p>
+                          <p className="text-xs text-neutral-600">{`Sent by: ${transfer.from_user?.name || receiverName || 'Treasury'}`}</p>
+                          <p className="text-xs text-neutral-600">{`Sent to: ${transfer.to_user?.name || 'Unknown member'}`}</p>
                           <p className="text-xs text-neutral-600">{`Amount: đ ${formatVndAmount(transfer.amount)}`}</p>
-                          <p className="text-xs text-neutral-500">{`Sent at: ${transfer.confirmed_at ? formatBangkokDateTime(transfer.confirmed_at) : '-'}`}</p>
+                          <p className="text-xs text-neutral-500">
+                            {`Sent at: ${transfer.confirmed_at ? formatBangkokDateTime(transfer.confirmed_at) : '-'}`}
+                          </p>
                         </div>
                       ))
                     )}
@@ -1336,7 +1610,7 @@ export const EventDetailPage = () => {
                   onClick={() => setExpenseModalOpen(true)}
                   variant="secondary"
                   className="px-3 py-1 text-xs"
-                  disabled={!isCheckedIn || !isJoiningClosed}
+                  disabled={!isCheckedIn || !isJoiningClosed || isExpenseAddingClosed}
                 >
                   Add
                 </Button>
@@ -1344,6 +1618,11 @@ export const EventDetailPage = () => {
               {!isJoiningClosed && (
                 <p className="text-xs text-neutral-600 mb-3">
                   Waiting admin/treasurer to mark Joining Closed before adding expenses.
+                </p>
+              )}
+              {isJoiningClosed && isExpenseAddingClosed && (
+                <p className="text-xs text-neutral-600 mb-3">
+                  Expense adding is closed for this event.
                 </p>
               )}
               {!isCheckedIn && (
@@ -1378,7 +1657,9 @@ export const EventDetailPage = () => {
                         </Badge>
                         {expense.status !== 'PENDING' && (
                           <p className="mt-1 text-xs text-neutral-600">
-                            {`by ${expense.approved_by_user?.name || 'Unknown'} at ${expense.approved_at ? formatBangkokDateTime(expense.approved_at) : '-'}`}
+                            {expense.status === 'APPROVED' && !expense.approved_by_user?.name && !expense.approved_at
+                              ? 'Auto-approved'
+                              : `by ${expense.approved_by_user?.name || 'Unknown'} at ${expense.approved_at ? formatBangkokDateTime(expense.approved_at) : '-'}`}
                           </p>
                         )}
                         {canAutoApproveExpense && expense.status === 'PENDING' && (
@@ -1411,6 +1692,21 @@ export const EventDetailPage = () => {
           </>
         )}
       </div>
+
+      <Modal
+        isOpen={Boolean(activeSettlementHelp)}
+        onClose={() => setSettlementHelpKey(null)}
+        title={activeSettlementHelp?.title || 'Settlement Info'}
+        footer={(
+          <Button onClick={() => setSettlementHelpKey(null)} className="w-full">
+            Got it
+          </Button>
+        )}
+      >
+        <p className="text-sm text-neutral-700">
+          {activeSettlementHelp?.description || ''}
+        </p>
+      </Modal>
 
       <Modal
         isOpen={editModalOpen}

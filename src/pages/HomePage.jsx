@@ -61,9 +61,9 @@ export const HomePage = () => {
       case 'Pending':
         return 'bg-warning-50 text-warning-900'
       case 'Credit':
-        return 'bg-success-50 text-success-700'
+        return 'bg-white text-success-800 border border-success-200'
       case 'Settled':
-        return 'bg-white/20 text-white border border-white/20'
+        return 'bg-success-700 text-white border border-success-800'
       default:
         return 'bg-white/20 text-white border border-white/20'
     }
@@ -264,17 +264,30 @@ export const HomePage = () => {
       }
 
       const settlementReadyEvents = activeEvents
-        .filter((event) => ['FINALIZED', 'COMPLETED'].includes(String(event.status || '').toUpperCase()))
+        .filter(
+          (event) =>
+            ['FINALIZED', 'COMPLETED'].includes(String(event.status || '').toUpperCase()) &&
+            (Boolean(event.expenses_closed_at) || String(event.status || '').toUpperCase() === 'COMPLETED')
+        )
         .sort((a, b) => new Date(b.date) - new Date(a.date))
       const paymentEvent = settlementReadyEvents[0]
       const teamTreasurerId = currentTeam?.teams?.treasurer_id
 
+      const joiningClosedEvents = activeEvents
+        .filter((event) => ['FINALIZED', 'COMPLETED'].includes(String(event.status || '').toUpperCase()))
+        .sort((a, b) => new Date(b.date) - new Date(a.date))
+      const waitingExpenseCloseEvent = joiningClosedEvents.find(
+        (event) => !event.expenses_closed_at && String(event.status || '').toUpperCase() !== 'COMPLETED'
+      )
+
       if (!paymentEvent) {
         setPaymentSummary({
-          status: `Waiting admin/treasurer to mark Joining Closed in ${currentTeam.teams.name}`,
+          status: waitingExpenseCloseEvent
+            ? `Waiting treasurer to close expense adding in ${currentTeam.teams.name}`
+            : `Waiting admin/treasurer to mark Joining Closed in ${currentTeam.teams.name}`,
           amount: 0,
           tone: 'default',
-          label: 'Joining Open',
+          label: waitingExpenseCloseEvent ? 'Expense Open' : 'Joining Open',
         })
         return
       }
@@ -328,24 +341,6 @@ export const HomePage = () => {
           )
           .reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
 
-        const confirmedOutgoingFromTreasuryAmount = transfersData
-          .filter(
-            (transfer) =>
-              String(transfer.from_user_id) === String(user.id) &&
-              isFromTreasuryTransfer(transfer) &&
-              isTransferConfirmed(transfer.status)
-          )
-          .reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
-
-        const confirmedIncomingToTreasuryAmount = transfersData
-          .filter(
-            (transfer) =>
-              String(transfer.to_user_id) === String(user.id) &&
-              isToTreasuryTransfer(transfer) &&
-              isTransferConfirmed(transfer.status)
-          )
-          .reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
-
         const settlementPaymentAmount = userPaymentTransfers.reduce(
           (sum, transfer) => sum + Number(transfer.amount || 0),
           0
@@ -354,7 +349,6 @@ export const HomePage = () => {
         const userApprovedExpenseTotal = approvedExpenses
           .filter((expense) => String(expense.user_id) === String(user.id))
           .reduce((sum, expense) => sum + parseFloat(expense.amount), 0)
-        const isCurrentUserTreasurer = String(user.id) === String(teamTreasurerId)
         const cachedCheckedIn = hasCheckedInEvent(user.id, paymentEvent.id)
         const userIsCheckedIn = participantsData.some(
           (participant) => String(participant.user_id) === String(user.id) && isParticipantCheckedIn(participant)
@@ -367,12 +361,10 @@ export const HomePage = () => {
           forgetCheckedInEvent(user.id, paymentEvent.id)
         }
 
-        const userContributionAmount = isCurrentUserTreasurer
-          ? userApprovedExpenseTotal + confirmedOutgoingFromTreasuryAmount - confirmedIncomingToTreasuryAmount
-          : settlementPaymentAmount + userApprovedExpenseTotal - confirmedIncomingPayoutAmount
+        const preSettlementBalance = userApprovedExpenseTotal - share
 
         const balance = userIsCheckedIn
-          ? Math.round((userContributionAmount - share) * 100) / 100
+          ? Math.round((preSettlementBalance + settlementPaymentAmount - confirmedIncomingPayoutAmount) * 100) / 100
           : 0
 
         const normalizedBalance = Math.abs(balance) < 1.0 ? 0 : balance
