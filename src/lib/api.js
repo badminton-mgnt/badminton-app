@@ -79,6 +79,44 @@ const attachExpenseUsers = async (rows, fields = 'id, name') => {
   }))
 }
 
+const attachEventMatchScoreUsers = async (rows, fields = 'id, name') => {
+  if (!rows?.length) {
+    return []
+  }
+
+  const userIds = [
+    ...new Set(
+      rows
+        .flatMap((row) => [
+          row.team_a_player_1,
+          row.team_a_player_2,
+          row.team_b_player_1,
+          row.team_b_player_2,
+          row.created_by,
+        ])
+        .filter(Boolean)
+    ),
+  ]
+
+  const { data: users, error } = await supabase
+    .from('users')
+    .select(fields)
+    .in('id', userIds)
+
+  if (error) throw error
+
+  const usersById = new Map((users || []).map((user) => [String(user.id), user]))
+
+  return rows.map((row) => ({
+    ...row,
+    team_a_player_1_user: usersById.get(String(row.team_a_player_1)) || null,
+    team_a_player_2_user: usersById.get(String(row.team_a_player_2)) || null,
+    team_b_player_1_user: usersById.get(String(row.team_b_player_1)) || null,
+    team_b_player_2_user: usersById.get(String(row.team_b_player_2)) || null,
+    created_by_user: usersById.get(String(row.created_by)) || null,
+  }))
+}
+
 // Auth functions
 export const signup = async (email, password, name) => {
   const { data, error } = await supabase.auth.signUp({
@@ -584,6 +622,28 @@ export const updateExpenseStatus = async (expenseId, status, approverUserId) => 
 
   if (error) throw error
   return data[0]
+}
+
+export const getEventMatchScores = async (eventId) => {
+  const { data: matchScores, error } = await supabase
+    .from('event_match_scores')
+    .select('*')
+    .eq('event_id', eventId)
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return attachEventMatchScoreUsers(matchScores, 'id, name')
+}
+
+export const createEventMatchScore = async (matchScore) => {
+  const { data, error } = await supabase
+    .from('event_match_scores')
+    .insert([matchScore])
+    .select()
+
+  if (error) throw error
+  const [enrichedMatchScore] = await attachEventMatchScoreUsers(data, 'id, name')
+  return enrichedMatchScore
 }
 
 export const getEventPaymentTransfers = async (eventId) => {

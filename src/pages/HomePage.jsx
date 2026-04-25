@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { Header, Button, Card, Badge, BottomNav, Modal } from '../components'
 import {
   checkinParticipant,
   getEventExpenses,
+  getPaymentInfo,
   getEventPaymentTransfers,
   getEventParticipants,
   getEvents,
@@ -32,6 +33,7 @@ const isJoiningLockedStatus = (status) => ['FINALIZED', 'COMPLETED', 'CANCELLED'
 
 export const HomePage = () => {
   const navigate = useNavigate()
+  const location = useLocation()
   const { user } = useAuth()
   const { teams, allTeams, currentTeam, loading: teamsLoading, refreshTeams, setCurrentTeam } = useTeam()
   const [availableTeams, setAvailableTeams] = useState([])
@@ -55,6 +57,7 @@ export const HomePage = () => {
   const [selectedCheckInEvent, setSelectedCheckInEvent] = useState(null)
   const [upcomingCount, setUpcomingCount] = useState(0)
   const [hasUpcoming, setHasUpcoming] = useState(false)
+  const [showPaymentSetupWarning, setShowPaymentSetupWarning] = useState(false)
 
   const getPaymentBadgeClassName = () => {
     switch (paymentSummary.label) {
@@ -116,12 +119,36 @@ export const HomePage = () => {
     loadTeamOverview()
   }, [currentTeam?.team_id, teams.length, user?.id])
 
+  useEffect(() => {
+    if (!location.state?.navRefreshAt || !user) return
+
+    loadData()
+    if (currentTeam) {
+      loadTeamOverview()
+    }
+  }, [location.state?.navRefreshAt])
+
   const loadData = async () => {
     try {
-      const userProfile = await getUserProfile(user.id)
+      const [userProfile, paymentData] = await Promise.all([
+        getUserProfile(user.id),
+        getPaymentInfo(user.id),
+      ])
       setUserName(userProfile.name)
+
+      const hasPaymentSetup = Boolean(
+        paymentData &&
+        (
+          paymentData.bank_name ||
+          paymentData.account_number ||
+          paymentData.account_name ||
+          paymentData.qr_url
+        )
+      )
+      setShowPaymentSetupWarning(!hasPaymentSetup)
     } catch (error) {
       console.error('Error loading data:', error)
+      setShowPaymentSetupWarning(false)
     } finally {
       setLoading(false)
     }
@@ -570,6 +597,16 @@ export const HomePage = () => {
       />
 
       <div className="container-mobile py-6 space-y-6">
+        {showPaymentSetupWarning && (
+          <Card
+            className="border border-warning-300 bg-warning-50 cursor-pointer"
+            onClick={() => navigate('/me')}
+          >
+            <p className="text-sm font-semibold text-warning-900">Add your payment info.</p>
+            <p className="text-xs text-warning-900 mt-1">Tap here to set up payment details in Me.</p>
+          </Card>
+        )}
+
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}

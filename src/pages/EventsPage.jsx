@@ -66,6 +66,15 @@ export const EventsPage = () => {
     }
   }, [location.state, currentTeam])
 
+  useEffect(() => {
+    if (!location.state?.navRefreshAt || !currentTeam) return
+
+    loadEvents()
+    if (user) {
+      loadCurrentUserRole()
+    }
+  }, [location.state?.navRefreshAt])
+
   const loadCurrentUserRole = async () => {
     try {
       const profile = await getUserProfile(user.id)
@@ -292,12 +301,18 @@ export const EventsPage = () => {
   }
 
   const todayKey = getBangkokDateKey(new Date())
-  const todayEvents = events.filter((event) => getBangkokDateKey(event.date) === todayKey)
-  const upcomingEvents = events.filter((event) => getBangkokDateKey(event.date) > todayKey)
-  const pastEvents = events.filter((event) => getBangkokDateKey(event.date) < todayKey)
+  const isCompletedEvent = (event) => String(event?.status || '').toUpperCase() === 'COMPLETED'
+  const completedEvents = events.filter((event) => isCompletedEvent(event))
+  const activeEvents = events.filter((event) => !isCompletedEvent(event))
+  const todayEvents = activeEvents.filter((event) => getBangkokDateKey(event.date) === todayKey)
+  const upcomingEvents = activeEvents.filter((event) => getBangkokDateKey(event.date) > todayKey)
+  const pastEvents = activeEvents.filter((event) => getBangkokDateKey(event.date) < todayKey)
   const pendingCheckInIdSet = new Set(pendingCheckInEventIds.map((id) => String(id)))
   const pendingCheckInPastEvents = pastEvents.filter((event) => pendingCheckInIdSet.has(String(event.id)))
-  const completedPastEvents = pastEvents.filter((event) => !pendingCheckInIdSet.has(String(event.id)))
+  const completedPastEvents = [
+    ...completedEvents,
+    ...pastEvents.filter((event) => !pendingCheckInIdSet.has(String(event.id))),
+  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
   if (teamsLoading || (loading && currentTeam && events.length === 0)) {
     return (
@@ -356,6 +371,15 @@ export const EventsPage = () => {
           </Card>
         ) : (
           <>
+            {!currentTeam?.teams?.treasurer_id && (
+              <Card className="border border-warning-300 bg-warning-50">
+                <p className="text-sm font-semibold text-warning-900">Team has no treasurer yet.</p>
+                <p className="text-xs text-warning-900 mt-1">
+                  Please ask an admin to assign a treasurer so settlements can be completed smoothly.
+                </p>
+              </Card>
+            )}
+
             {todayEvents.length > 0 && (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
@@ -608,9 +632,11 @@ export const EventsPage = () => {
                               {formatBangkokDateTime(event.date)}
                             </p>
                           </div>
-                          <Badge status={event.status === 'CANCELLED' ? 'error' : getBangkokDateKey(event.date) === todayKey ? 'success' : getBangkokDateKey(event.date) > todayKey ? 'warning' : 'success'}>
+                          <Badge status={event.status === 'CANCELLED' ? 'error' : String(event.status || '').toUpperCase() === 'COMPLETED' ? 'success' : getBangkokDateKey(event.date) === todayKey ? 'success' : getBangkokDateKey(event.date) > todayKey ? 'warning' : 'success'}>
                             {event.status === 'CANCELLED'
                               ? 'Cancelled'
+                              : String(event.status || '').toUpperCase() === 'COMPLETED'
+                              ? 'Completed'
                               : getBangkokDateKey(event.date) === todayKey
                               ? 'Today'
                               : getBangkokDateKey(event.date) > todayKey
