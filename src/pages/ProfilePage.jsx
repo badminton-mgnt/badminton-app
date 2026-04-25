@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { Header, Card, Button, BottomNav, Modal, Input } from '../components'
 import { getUserProfile, logout, getTeams, getPaymentInfo, setPaymentInfo } from '../lib/api'
 import { motion } from 'framer-motion'
@@ -8,6 +8,7 @@ import { useAuth } from '../contexts/AuthContext'
 
 export const ProfilePage = () => {
   const navigate = useNavigate()
+  const location = useLocation()
   const { user } = useAuth()
   const [profile, setProfile] = useState(null)
   const [teams, setTeams] = useState([])
@@ -27,6 +28,12 @@ export const ProfilePage = () => {
       loadData()
     }
   }, [user])
+
+  useEffect(() => {
+    if (!location.state?.navRefreshAt || !user) return
+
+    loadData()
+  }, [location.state?.navRefreshAt])
 
   const loadData = async () => {
     try {

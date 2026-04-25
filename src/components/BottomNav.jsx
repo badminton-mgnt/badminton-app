@@ -1,5 +1,5 @@
-import { Link, useLocation } from 'react-router-dom'
-import { Home, Calendar, Settings2, User } from 'lucide-react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { Home, Calendar, Trophy, Settings2, User } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
@@ -7,6 +7,7 @@ import { getUserProfile } from '../lib/api'
 
 export const BottomNav = () => {
   const location = useLocation()
+  const navigate = useNavigate()
   const { user } = useAuth()
   const [isAdmin, setIsAdmin] = useState(false)
 
@@ -32,9 +33,19 @@ export const BottomNav = () => {
   const items = [
     { path: '/', label: 'Home', icon: Home },
     { path: '/events', label: 'Events', icon: Calendar },
+    { path: '/scores', label: 'Scores', icon: Trophy },
     ...(isAdmin ? [{ path: '/manage', label: 'Manage', icon: Settings2 }] : []),
     { path: '/me', label: 'Me', icon: User },
   ]
+
+  const handleTabClick = (path) => {
+    navigate(path, {
+      replace: location.pathname === path,
+      state: {
+        navRefreshAt: Date.now(),
+      },
+    })
+  }
 
   return (
     <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-neutral-200">
@@ -42,9 +53,10 @@ export const BottomNav = () => {
         {items.map(({ path, label, icon: Icon }) => {
           const isActive = location.pathname === path
           return (
-            <Link
+            <button
+              type="button"
               key={path}
-              to={path}
+              onClick={() => handleTabClick(path)}
               className="flex-1 flex flex-col items-center justify-center py-3 text-neutral-600 hover:text-primary-400 transition"
             >
               {isActive && (
@@ -56,7 +68,7 @@ export const BottomNav = () => {
               )}
               <Icon size={24} />
               <span className="text-xs mt-1">{label}</span>
-            </Link>
+            </button>
           )
         })}
       </div>

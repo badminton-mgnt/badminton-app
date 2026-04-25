@@ -1007,7 +1007,7 @@ export const EventDetailPage = () => {
                   {isCheckedIn && checkedInAtLabel && (
                     <p className="text-xs text-neutral-600 mt-1">
                       {checkedInByName && !checkedInBySelf
-                        ? `Checked in by ${checkedInByName} at ${checkedInAtLabel}`
+                        ? `Checked in at ${checkedInAtLabel} by ${checkedInByName}`
                         : `Checked in at ${checkedInAtLabel}`}
                     </p>
                   )}
@@ -1569,7 +1569,7 @@ export const EventDetailPage = () => {
                         {participant.checked_in && participant.checked_in_at && (
                           <p className="text-xs text-neutral-600 mt-1">
                             {participant.checked_in_by_user?.name && String(participant.checked_in_by) !== String(participant.user_id)
-                              ? `Checked in by ${participant.checked_in_by_user.name} at ${formatBangkokDateTime(participant.checked_in_at)}`
+                              ? `Checked in at ${formatBangkokDateTime(participant.checked_in_at)} by ${participant.checked_in_by_user.name}`
                               : `Checked in at ${formatBangkokDateTime(participant.checked_in_at)}`}
                           </p>
                         )}

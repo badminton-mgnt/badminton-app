@@ -8,6 +8,7 @@ import {
   ForgotPasswordPage,
   HomePage,
   EventsPage,
+  ScoresPage,
   EventDetailPage,
   ProfilePage,
   ManagePage,
@@ -42,6 +43,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <EventsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/scores"
+              element={
+                <ProtectedRoute>
+                  <ScoresPage />
                 </ProtectedRoute>
               }
             />

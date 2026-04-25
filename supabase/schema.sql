@@ -67,6 +67,25 @@ CREATE TABLE event_participants (
   UNIQUE(event_id, user_id)
 );
 
+-- Create Event Match Scores Table
+CREATE TABLE event_match_scores (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  match_type TEXT NOT NULL CHECK (match_type IN ('SINGLES', 'DOUBLES')),
+  team_a_player_1 UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  team_a_player_2 UUID REFERENCES users(id) ON DELETE CASCADE,
+  team_b_player_1 UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  team_b_player_2 UUID REFERENCES users(id) ON DELETE CASCADE,
+  team_a_score INTEGER NOT NULL DEFAULT 0 CHECK (team_a_score >= 0),
+  team_b_score INTEGER NOT NULL DEFAULT 0 CHECK (team_b_score >= 0),
+  started_at TIMESTAMP NOT NULL,
+  ended_at TIMESTAMP NOT NULL,
+  duration_seconds INTEGER NOT NULL CHECK (duration_seconds >= 0),
+  created_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMP DEFAULT now()
+);
+
 -- Create Expenses Table
 CREATE TABLE expenses (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -139,6 +158,7 @@ alter table public.expenses enable row level security;
 alter table public.payment_transfers enable row level security;
 alter table public.payment_info enable row level security;
 alter table public.event_participants enable row level security;
+alter table public.event_match_scores enable row level security;
 alter table public.event_participants add column if not exists checked_in_by uuid references public.users(id) on delete set null;
 alter table public.events add column if not exists expenses_closed_at timestamp;
 alter table public.events add column if not exists expenses_closed_by uuid references public.users(id) on delete set null;
@@ -186,6 +206,47 @@ with check (
     from public.users u
     where u.id = auth.uid()
     and u.role = 'admin'
+  )
+);
+
+
+-- =====================================================
+-- 11. EVENT MATCH SCORES
+-- =====================================================
+
+drop policy if exists "view event match scores" on public.event_match_scores;
+drop policy if exists "create event match scores" on public.event_match_scores;
+
+create policy "view event match scores"
+on public.event_match_scores
+for select
+to authenticated
+using (
+  exists (
+    select 1
+    from public.team_members tm
+    where tm.team_id = event_match_scores.team_id
+      and tm.user_id = auth.uid()
+  )
+);
+
+create policy "create event match scores"
+on public.event_match_scores
+for insert
+to authenticated
+with check (
+  created_by = auth.uid()
+  and exists (
+    select 1
+    from public.team_members tm
+    where tm.team_id = event_match_scores.team_id
+      and tm.user_id = auth.uid()
+  )
+  and exists (
+    select 1
+    from public.events e
+    where e.id = event_match_scores.event_id
+      and e.team_id = event_match_scores.team_id
   )
 );
 
@@ -711,20 +772,11 @@ with check (
      and target_tm.user_id = event_participants.user_id
     where e.id = event_participants.event_id
       and upper(coalesce(e.status, 'UPCOMING')) not in ('FINALIZED', 'COMPLETED', 'CANCELLED')
-      and (
-        event_participants.user_id = auth.uid()
-        or exists (
-          select 1
-          from public.users u
-          where u.id = auth.uid()
-            and u.role in ('admin', 'sub_admin')
-        )
-        or exists (
-          select 1
-          from public.teams t
-          where t.id = e.team_id
-            and t.treasurer_id = auth.uid()
-        )
+      and exists (
+        select 1
+        from public.team_members actor_tm
+        where actor_tm.team_id = e.team_id
+          and actor_tm.user_id = auth.uid()
       )
   )
 );
@@ -742,20 +794,11 @@ using (
      and target_tm.user_id = event_participants.user_id
     where e.id = event_participants.event_id
       and upper(coalesce(e.status, 'UPCOMING')) not in ('FINALIZED', 'COMPLETED', 'CANCELLED')
-      and (
-        event_participants.user_id = auth.uid()
-        or exists (
-          select 1
-          from public.users u
-          where u.id = auth.uid()
-            and u.role in ('admin', 'sub_admin')
-        )
-        or exists (
-          select 1
-          from public.teams t
-          where t.id = e.team_id
-            and t.treasurer_id = auth.uid()
-        )
+      and exists (
+        select 1
+        from public.team_members actor_tm
+        where actor_tm.team_id = e.team_id
+          and actor_tm.user_id = auth.uid()
       )
   )
 )
@@ -768,20 +811,11 @@ with check (
      and target_tm.user_id = event_participants.user_id
     where e.id = event_participants.event_id
       and upper(coalesce(e.status, 'UPCOMING')) not in ('FINALIZED', 'COMPLETED', 'CANCELLED')
-      and (
-        event_participants.user_id = auth.uid()
-        or exists (
-          select 1
-          from public.users u
-          where u.id = auth.uid()
-            and u.role in ('admin', 'sub_admin')
-        )
-        or exists (
-          select 1
-          from public.teams t
-          where t.id = e.team_id
-            and t.treasurer_id = auth.uid()
-        )
+      and exists (
+        select 1
+        from public.team_members actor_tm
+        where actor_tm.team_id = e.team_id
+          and actor_tm.user_id = auth.uid()
       )
   )
 );
@@ -857,7 +891,7 @@ grant execute on function public.delete_team_with_reason(uuid, text) to authenti
 
 
 -- =====================================================
--- 11. CRITICAL FIX (MANDATORY)
+-- 12. CRITICAL FIX (MANDATORY)
 -- =====================================================
 
 alter table public.users
@@ -942,3 +976,5 @@ CREATE INDEX idx_expenses_event_id ON expenses(event_id);
 CREATE INDEX idx_expenses_user_id ON expenses(user_id);
 CREATE INDEX idx_event_participants_event_id ON event_participants(event_id);
 CREATE INDEX idx_event_participants_user_id ON event_participants(user_id);
+CREATE INDEX idx_event_match_scores_event_id ON event_match_scores(event_id);
+CREATE INDEX idx_event_match_scores_team_id ON event_match_scores(team_id);
