@@ -6,6 +6,9 @@ import { motion } from 'framer-motion'
 import { LogOut, Edit2 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 
+const TEXT_INPUT_MAX_LENGTH = 100
+const NUMERIC_INPUT_MAX_LENGTH = 20
+
 export const ProfilePage = () => {
   const navigate = useNavigate()
   const location = useLocation()
@@ -266,19 +269,25 @@ export const ProfilePage = () => {
           <Input
             label="Bank Name"
             value={paymentForm.bank_name}
-            onChange={(e) => setPaymentForm(prev => ({ ...prev, bank_name: e.target.value }))}
+            onChange={(e) => setPaymentForm(prev => ({ ...prev, bank_name: e.target.value.slice(0, TEXT_INPUT_MAX_LENGTH) }))}
+            maxLength={TEXT_INPUT_MAX_LENGTH}
             placeholder="e.g., HDFC Bank"
           />
           <Input
             label="Account Name"
             value={paymentForm.account_name}
-            onChange={(e) => setPaymentForm(prev => ({ ...prev, account_name: e.target.value }))}
+            onChange={(e) => setPaymentForm(prev => ({ ...prev, account_name: e.target.value.slice(0, TEXT_INPUT_MAX_LENGTH) }))}
+            maxLength={TEXT_INPUT_MAX_LENGTH}
             placeholder="Your name"
           />
           <Input
             label="Account Number"
             value={paymentForm.account_number}
-            onChange={(e) => setPaymentForm(prev => ({ ...prev, account_number: e.target.value }))}
+            onChange={(e) => setPaymentForm(prev => ({
+              ...prev,
+              account_number: e.target.value.replace(/\D/g, '').slice(0, NUMERIC_INPUT_MAX_LENGTH),
+            }))}
+            maxLength={NUMERIC_INPUT_MAX_LENGTH}
             placeholder="1234567890"
           />
           <div>

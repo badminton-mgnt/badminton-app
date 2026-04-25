@@ -18,6 +18,8 @@ import { useTeam } from '../contexts/TeamContext'
 
 const CHECKIN_CONFIRM_WINDOW_DAYS = 3
 const DAY_IN_MS = 24 * 60 * 60 * 1000
+const TEXT_INPUT_MAX_LENGTH = 100
+const COURT_NUMBER_MAX_LENGTH = 2
 const isJoiningLockedStatus = (status) => ['FINALIZED', 'COMPLETED', 'CANCELLED'].includes(String(status || '').toUpperCase())
 
 const emptyForm = {
@@ -740,7 +742,8 @@ export const EventsPage = () => {
           <Input
             label="Event Title"
             value={formData.title}
-            onChange={(e) => setFormData((prev) => ({ ...prev, title: e.target.value }))}
+            onChange={(e) => setFormData((prev) => ({ ...prev, title: e.target.value.slice(0, TEXT_INPUT_MAX_LENGTH) }))}
+            maxLength={TEXT_INPUT_MAX_LENGTH}
             placeholder="e.g., Morning Session"
           />
           <Input
@@ -752,14 +755,19 @@ export const EventsPage = () => {
           <Input
             label="Location"
             value={formData.location}
-            onChange={(e) => setFormData((prev) => ({ ...prev, location: e.target.value }))}
+            onChange={(e) => setFormData((prev) => ({ ...prev, location: e.target.value.slice(0, TEXT_INPUT_MAX_LENGTH) }))}
+            maxLength={TEXT_INPUT_MAX_LENGTH}
             placeholder="Where will it be?"
           />
           <Input
             label="Court Number"
             type="number"
             value={formData.court_number}
-            onChange={(e) => setFormData((prev) => ({ ...prev, court_number: e.target.value }))}
+            onChange={(e) => setFormData((prev) => ({
+              ...prev,
+              court_number: e.target.value.replace(/\D/g, '').slice(0, COURT_NUMBER_MAX_LENGTH),
+            }))}
+            maxLength={COURT_NUMBER_MAX_LENGTH}
             placeholder="1"
           />
         </div>
