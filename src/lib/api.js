@@ -452,7 +452,7 @@ export const createEvent = async (event, teamId) => {
 export const getEvents = async (teamId) => {
   const { data, error } = await supabase
     .from('events')
-    .select('*')
+    .select('*, teams(id, name)')
     .eq('team_id', teamId)
     .order('date', { ascending: true })
 
@@ -463,7 +463,7 @@ export const getEvents = async (teamId) => {
 export const getEventDetail = async (eventId) => {
   const { data, error } = await supabase
     .from('events')
-    .select('*')
+    .select('*, teams(id, name)')
     .eq('id', eventId)
     .single()
 
