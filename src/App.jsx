@@ -6,6 +6,7 @@ import {
   SignupPage,
   LoginPage,
   ForgotPasswordPage,
+  ResetPasswordPage,
   HomePage,
   EventsPage,
   ScoresPage,
@@ -28,6 +29,7 @@ function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
 
             {/* Protected Routes */}
             <Route

@@ -118,12 +118,19 @@ const attachEventMatchScoreUsers = async (rows, fields = 'id, name') => {
 }
 
 // Auth functions
+const getAppBaseUrl = () => new URL(import.meta.env.BASE_URL || '/', window.location.origin).toString()
+const getAuthRedirectUrl = (path = '/') => {
+  const normalizedPath = String(path || '/').replace(/^\/+/, '')
+  return new URL(normalizedPath, getAppBaseUrl()).toString()
+}
+
 export const signup = async (email, password, name) => {
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
       data: { name },
+      emailRedirectTo: getAuthRedirectUrl('/login'),
     },
   })
 
@@ -240,7 +247,7 @@ export const deleteTeamInvitation = async (invitationId) => {
 
 export const resetPassword = async (email) => {
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${window.location.origin}/reset-password`,
+    redirectTo: getAuthRedirectUrl('/reset-password'),
   })
   if (error) throw error
 }
