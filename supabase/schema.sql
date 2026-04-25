@@ -368,15 +368,7 @@ on public.team_members
 for insert
 to authenticated
 with check (
-  (
-    user_id = auth.uid()
-    and exists (
-      select 1
-      from public.team_invitations ti
-      where ti.team_id = team_members.team_id
-        and lower(ti.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
-    )
-  )
+  user_id = auth.uid()
   or exists (
     select 1
     from public.users u
