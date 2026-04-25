@@ -306,16 +306,28 @@ export const EventsPage = () => {
 
   const todayKey = getBangkokDateKey(new Date())
   const isCompletedEvent = (event) => String(event?.status || '').toUpperCase() === 'COMPLETED'
+  const isCancelledEvent = (event) => String(event?.status || '').toUpperCase() === 'CANCELLED'
+  const isPastBeyondAutoWindow = (event) => {
+    const eventTime = new Date(event?.date).getTime()
+    if (!Number.isFinite(eventTime)) return false
+    return Date.now() > eventTime + (CHECKIN_CONFIRM_WINDOW_DAYS * DAY_IN_MS)
+  }
   const completedEvents = events.filter((event) => isCompletedEvent(event))
   const activeEvents = events.filter((event) => !isCompletedEvent(event))
   const todayEvents = activeEvents.filter((event) => getBangkokDateKey(event.date) === todayKey)
   const upcomingEvents = activeEvents.filter((event) => getBangkokDateKey(event.date) > todayKey)
   const pastEvents = activeEvents.filter((event) => getBangkokDateKey(event.date) < todayKey)
   const pendingCheckInIdSet = new Set(pendingCheckInEventIds.map((id) => String(id)))
-  const pendingCheckInPastEvents = pastEvents.filter((event) => pendingCheckInIdSet.has(String(event.id)))
+  const pendingSettlementPastEvents = pastEvents.filter(
+    (event) => !isCancelledEvent(event) && !isPastBeyondAutoWindow(event)
+  )
+  const pendingCheckInPastEvents = pendingSettlementPastEvents.filter((event) => pendingCheckInIdSet.has(String(event.id)))
+  const pendingSettlementPastEventsNoCheckIn = pendingSettlementPastEvents.filter(
+    (event) => !pendingCheckInIdSet.has(String(event.id))
+  )
   const completedPastEvents = [
     ...completedEvents,
-    ...pastEvents.filter((event) => !pendingCheckInIdSet.has(String(event.id))),
+    ...pastEvents.filter((event) => isCancelledEvent(event) || isPastBeyondAutoWindow(event)),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
   if (teamsLoading || (loading && currentTeam && events.length === 0)) {
@@ -464,6 +476,51 @@ export const EventsPage = () => {
                             )}
                           </div>
                         )}
+                      </Card>
+                    </motion.div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+
+            {pendingSettlementPastEventsNoCheckIn.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
+              >
+                <h2 className="text-sm font-semibold text-neutral-700 mb-3 uppercase">
+                  Pending Settlement
+                </h2>
+                <p className="text-xs text-neutral-600 mb-3">
+                  Past events stay here until treasurer marks them completed, or they pass the {CHECKIN_CONFIRM_WINDOW_DAYS}-day window.
+                </p>
+                <div className="space-y-3">
+                  {pendingSettlementPastEventsNoCheckIn.map((event) => (
+                    <motion.div
+                      key={event.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      onClick={() => navigate(`/event/${event.id}`)}
+                      className="cursor-pointer"
+                    >
+                      <Card className="hover:shadow-lg transition border border-neutral-200">
+                        <div className="flex items-start justify-between mb-3 gap-3">
+                          <div>
+                            <h3 className="font-semibold text-lg">{event.title}</h3>
+                            <p className="text-sm text-neutral-600">
+                              {formatBangkokDateTime(event.date)}
+                            </p>
+                          </div>
+                          <Badge status="warning">Pending Settlement</Badge>
+                        </div>
+                        <div className="flex items-center gap-4 text-sm text-neutral-600">
+                          <div className="flex items-center gap-1">
+                            <MapPin size={16} />
+                            {event.location || 'Location TBD'}
+                          </div>
+                          {event.court_number && <div>Court {event.court_number}</div>}
+                        </div>
                       </Card>
                     </motion.div>
                   ))}
