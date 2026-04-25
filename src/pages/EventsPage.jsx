@@ -199,8 +199,10 @@ export const EventsPage = () => {
     setModalOpen(true)
   }
 
-  const canManageEvent = (event) =>
-    event.created_by === user?.id || ['admin', 'sub_admin'].includes(currentUserRole)
+  const isAdminRole = ['admin', 'sub_admin'].includes(currentUserRole)
+  const canEditEvent = (event) => event.created_by === user?.id || isAdminRole
+  const canCancelEvent = (event) => isAdminRole && event.status !== 'CANCELLED'
+  const canDeleteEvent = (event) => event.created_by === user?.id || isAdminRole
 
   const canCheckInEvent = (event) => !isJoiningLockedStatus(event?.status)
 
@@ -423,7 +425,7 @@ export const EventsPage = () => {
                           </div>
                           {event.court_number && <div>Court {event.court_number}</div>}
                         </div>
-                        {canManageEvent(event) && (
+                        {canEditEvent(event) && (
                           <div className="mt-4 flex gap-2">
                             <Button
                               variant="secondary"
@@ -435,7 +437,7 @@ export const EventsPage = () => {
                                 Edit
                               </span>
                             </Button>
-                            {event.status !== 'CANCELLED' && (
+                            {canCancelEvent(event) && (
                               <Button
                                 variant="secondary"
                                 className="flex-1"
@@ -447,17 +449,19 @@ export const EventsPage = () => {
                                 </span>
                               </Button>
                             )}
-                            <Button
-                              variant="danger"
-                              className="flex-1"
-                              onClick={(e) => handleDeleteEvent(event, e)}
-                              loading={actionLoading}
-                            >
-                              <span className="inline-flex items-center gap-2">
-                                <Trash2 size={14} />
-                                Delete
-                              </span>
-                            </Button>
+                            {canDeleteEvent(event) && (
+                              <Button
+                                variant="danger"
+                                className="flex-1"
+                                onClick={(e) => handleDeleteEvent(event, e)}
+                                loading={actionLoading}
+                              >
+                                <span className="inline-flex items-center gap-2">
+                                  <Trash2 size={14} />
+                                  Delete
+                                </span>
+                              </Button>
+                            )}
                           </div>
                         )}
                       </Card>
@@ -552,7 +556,7 @@ export const EventsPage = () => {
                           </div>
                           {event.court_number && <div>Court {event.court_number}</div>}
                         </div>
-                        {canManageEvent(event) && (
+                        {canEditEvent(event) && (
                           <div className="mt-4 flex gap-2">
                             <Button
                               variant="secondary"
@@ -564,7 +568,7 @@ export const EventsPage = () => {
                                 Edit
                               </span>
                             </Button>
-                            {event.status !== 'CANCELLED' && (
+                            {canCancelEvent(event) && (
                               <Button
                                 variant="secondary"
                                 className="flex-1"
@@ -576,17 +580,19 @@ export const EventsPage = () => {
                                 </span>
                               </Button>
                             )}
-                            <Button
-                              variant="danger"
-                              className="flex-1"
-                              onClick={(e) => handleDeleteEvent(event, e)}
-                              loading={actionLoading}
-                            >
-                              <span className="inline-flex items-center gap-2">
-                                <Trash2 size={14} />
-                                Delete
-                              </span>
-                            </Button>
+                            {canDeleteEvent(event) && (
+                              <Button
+                                variant="danger"
+                                className="flex-1"
+                                onClick={(e) => handleDeleteEvent(event, e)}
+                                loading={actionLoading}
+                              >
+                                <span className="inline-flex items-center gap-2">
+                                  <Trash2 size={14} />
+                                  Delete
+                                </span>
+                              </Button>
+                            )}
                           </div>
                         )}
                       </Card>
