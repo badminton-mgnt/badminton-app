@@ -893,6 +893,7 @@ export const EventDetailPage = () => {
         }
         subtitleContent={(
           <div className="text-sm opacity-90 space-y-1">
+            <p>{`Team: ${event?.teams?.name || 'Unknown team'}`}</p>
             <p>{formatBangkokDateTime(event?.date)}</p>
             <p>{`Location: ${event?.court_number ? `Court ${event.court_number}` : 'Court not assigned'}`} - {`${event?.location || 'Location not set'}`}</p>
           </div>

@@ -418,6 +418,7 @@ export const EventsPage = () => {
                         <div className="flex items-start justify-between mb-3 gap-3">
                           <div>
                             <h3 className="font-semibold text-lg">{event.title}</h3>
+                            <p className="text-xs text-neutral-500">{event?.teams?.name || currentTeam?.teams?.name || 'Team'}</p>
                             <p className="text-sm text-neutral-600">
                               {formatBangkokDateTime(event.date)}
                             </p>
@@ -508,6 +509,7 @@ export const EventsPage = () => {
                         <div className="flex items-start justify-between mb-3 gap-3">
                           <div>
                             <h3 className="font-semibold text-lg">{event.title}</h3>
+                            <p className="text-xs text-neutral-500">{event?.teams?.name || currentTeam?.teams?.name || 'Team'}</p>
                             <p className="text-sm text-neutral-600">
                               {formatBangkokDateTime(event.date)}
                             </p>
@@ -543,6 +545,7 @@ export const EventsPage = () => {
                       <div className="flex items-start justify-between gap-3 mb-3">
                         <div>
                           <h3 className="font-semibold text-lg">{event.title}</h3>
+                          <p className="text-xs text-neutral-500">{event?.teams?.name || currentTeam?.teams?.name || 'Team'}</p>
                           <p className="text-sm text-neutral-700">{formatBangkokDateTime(event.date)}</p>
                         </div>
                         <Badge status="warning">Pending Confirm</Badge>
@@ -598,6 +601,7 @@ export const EventsPage = () => {
                         <div className="flex items-start justify-between mb-3 gap-3">
                           <div>
                             <h3 className="font-semibold text-lg">{event.title}</h3>
+                            <p className="text-xs text-neutral-500">{event?.teams?.name || currentTeam?.teams?.name || 'Team'}</p>
                             <p className="text-sm text-neutral-600">
                               {formatBangkokDateTime(event.date)}
                             </p>
@@ -693,6 +697,7 @@ export const EventsPage = () => {
                         <div className="flex items-center justify-between">
                           <div>
                             <h3 className="font-semibold">{event.title}</h3>
+                            <p className="text-xs text-neutral-500">{event?.teams?.name || currentTeam?.teams?.name || 'Team'}</p>
                             <p className="text-sm text-neutral-600">
                               {formatBangkokDateTime(event.date)}
                             </p>

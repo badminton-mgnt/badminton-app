@@ -1253,6 +1253,7 @@ as $$
 declare
   v_actor_id uuid;
   v_actor_name text;
+  v_team_name text;
   v_title text;
   v_message text;
   v_type text;
@@ -1265,32 +1266,36 @@ begin
   select u.name into v_actor_name from public.users u where u.id = v_actor_id;
 
   if tg_op = 'INSERT' then
-    v_type := 'EVENT_CREATED';
-    v_title := 'New event created';
-    v_message := format('%s created event "%s".', coalesce(v_actor_name, 'A teammate'), coalesce(new.title, 'New Event'));
-    v_link := '/event/' || new.id::text;
     v_team_id := new.team_id;
+    select t.name into v_team_name from public.teams t where t.id = v_team_id;
+    v_type := 'EVENT_CREATED';
+    v_title := 'New Team Event';
+    v_message := format('%s created a new event "%s" for team "%s".', coalesce(v_actor_name, 'A teammate'), coalesce(new.title, 'New Event'), coalesce(v_team_name, 'Unknown Team'));
+    v_link := '/event/' || new.id::text;
     v_event_id := new.id;
   elsif tg_op = 'UPDATE' and old.status is distinct from new.status and upper(coalesce(new.status, '')) = 'CANCELLED' then
-    v_type := 'EVENT_CANCELLED';
-    v_title := 'Event cancelled';
-    v_message := format('%s cancelled event "%s".', coalesce(v_actor_name, 'A teammate'), coalesce(new.title, 'An event'));
-    v_link := '/event/' || new.id::text;
     v_team_id := new.team_id;
+    select t.name into v_team_name from public.teams t where t.id = v_team_id;
+    v_type := 'EVENT_CANCELLED';
+    v_title := 'Event Cancelled';
+    v_message := format('%s cancelled event "%s" for team "%s".', coalesce(v_actor_name, 'A teammate'), coalesce(new.title, 'An event'), coalesce(v_team_name, 'Unknown Team'));
+    v_link := '/event/' || new.id::text;
     v_event_id := new.id;
   elsif tg_op = 'UPDATE' and old.status is distinct from new.status and upper(coalesce(new.status, '')) = 'COMPLETED' then
-    v_type := 'EVENT_SETTLEMENT_COMPLETED';
-    v_title := 'Settlement completed';
-    v_message := format('Settlement for event "%s" is completed.', coalesce(new.title, 'an event'));
-    v_link := '/event/' || new.id::text;
     v_team_id := new.team_id;
+    select t.name into v_team_name from public.teams t where t.id = v_team_id;
+    v_type := 'EVENT_SETTLEMENT_COMPLETED';
+    v_title := 'Settlement Completed';
+    v_message := format('Settlement for event "%s" in team "%s" is now complete.', coalesce(new.title, 'an event'), coalesce(v_team_name, 'Unknown Team'));
+    v_link := '/event/' || new.id::text;
     v_event_id := new.id;
   elsif tg_op = 'DELETE' then
-    v_type := 'EVENT_DELETED';
-    v_title := 'Event deleted';
-    v_message := format('%s deleted event "%s".', coalesce(v_actor_name, 'A teammate'), coalesce(old.title, 'An event'));
-    v_link := '/events';
     v_team_id := old.team_id;
+    select t.name into v_team_name from public.teams t where t.id = v_team_id;
+    v_type := 'EVENT_DELETED';
+    v_title := 'Event Deleted';
+    v_message := format('%s deleted event "%s" from team "%s".', coalesce(v_actor_name, 'A teammate'), coalesce(old.title, 'An event'), coalesce(v_team_name, 'Unknown Team'));
+    v_link := '/events';
     v_event_id := old.id;
   else
     return case when tg_op = 'DELETE' then old else new end;
