@@ -236,13 +236,17 @@ export const EventDetailPage = () => {
       }
 
       if (eventData?.team_id && participantsData && expensesData && transfersData && treasuryUserId) {
-        transfersData = await syncTreasurerContributionTransfer({
-          eventData,
-          participantsData,
-          expensesData,
-          transfersData,
-          treasuryUserId,
-        })
+        try {
+          transfersData = await syncTreasurerContributionTransfer({
+            eventData,
+            participantsData,
+            expensesData,
+            transfersData,
+            treasuryUserId,
+          })
+        } catch (syncError) {
+          console.warn('Treasury contribution sync warning:', syncError)
+        }
       }
 
       if (participantsData) {
