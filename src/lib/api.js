@@ -607,6 +607,17 @@ export const createPaymentTransfer = async (transfer) => {
   return data[0]
 }
 
+export const updatePaymentTransfer = async (transferId, updates) => {
+  const { data, error } = await supabase
+    .from('payment_transfers')
+    .update(updates)
+    .eq('id', transferId)
+    .select()
+
+  if (error) throw error
+  return data[0]
+}
+
 export const confirmPaymentTransfer = async (transferId) => {
   const { data, error } = await supabase
     .from('payment_transfers')

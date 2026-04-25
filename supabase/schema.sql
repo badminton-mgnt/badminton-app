@@ -50,6 +50,8 @@ CREATE TABLE events (
   location TEXT,
   court_number INTEGER,
   status TEXT DEFAULT 'UPCOMING' CHECK (status IN ('UPCOMING', 'ONGOING', 'COMPLETED', 'FINALIZED', 'CANCELLED')),
+  expenses_closed_at TIMESTAMP,
+  expenses_closed_by UUID REFERENCES users(id) ON DELETE SET NULL,
   created_by UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMP DEFAULT now()
 );
@@ -138,6 +140,8 @@ alter table public.payment_transfers enable row level security;
 alter table public.payment_info enable row level security;
 alter table public.event_participants enable row level security;
 alter table public.event_participants add column if not exists checked_in_by uuid references public.users(id) on delete set null;
+alter table public.events add column if not exists expenses_closed_at timestamp;
+alter table public.events add column if not exists expenses_closed_by uuid references public.users(id) on delete set null;
 
 
 -- =====================================================
@@ -509,6 +513,7 @@ with check (
     where e.id = expenses.event_id
       and e.team_id = expenses.team_id
       and upper(coalesce(e.status, 'UPCOMING')) in ('FINALIZED', 'COMPLETED')
+      and e.expenses_closed_at is null
   )
 );
 
