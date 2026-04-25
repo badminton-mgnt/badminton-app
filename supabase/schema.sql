@@ -368,20 +368,12 @@ on public.team_members
 for insert
 to authenticated
 with check (
-  (
-    user_id = auth.uid()
-    and exists (
-      select 1
-      from public.team_invitations ti
-      where ti.team_id = team_members.team_id
-        and lower(ti.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
-    )
-  )
+  user_id = auth.uid()
   or exists (
     select 1
     from public.users u
     where u.id = auth.uid()
-      and u.role in ('admin', 'sub_admin')
+      and lower(coalesce(u.role, '')) in ('admin', 'sub_admin')
   )
 );
 
@@ -532,7 +524,7 @@ using (
   or exists (
     select 1 from public.users u
     where u.id = auth.uid()
-    and u.role in ('admin', 'sub_admin')
+    and lower(coalesce(u.role, '')) in ('admin', 'sub_admin')
   )
 );
 
@@ -554,6 +546,11 @@ using (
     select 1 from public.team_members tm
     where tm.team_id = expenses.team_id
     and tm.user_id = auth.uid()
+  )
+  or exists (
+    select 1 from public.users u
+    where u.id = auth.uid()
+    and lower(coalesce(u.role, '')) in ('admin', 'sub_admin')
   )
 );
 
@@ -652,18 +649,30 @@ begin
     raise exception 'Authentication required';
   end if;
 
-  if old.to_user_id <> auth.uid() then
-    raise exception 'Only receiver can confirm transfer';
-  end if;
-
   if new.id <> old.id
     or new.team_id <> old.team_id
     or new.event_id <> old.event_id
     or new.from_user_id <> old.from_user_id
     or new.to_user_id <> old.to_user_id
-    or new.amount <> old.amount
-    or new.direction <> old.direction
     or new.created_at <> old.created_at then
+    raise exception 'Core transfer fields cannot be updated';
+  end if;
+
+  if old.from_user_id = auth.uid() and old.to_user_id = auth.uid() then
+    if new.status <> 'CONFIRMED' then
+      raise exception 'Self treasury transfer must stay CONFIRMED';
+    end if;
+
+    new.confirmed_at := coalesce(new.confirmed_at, old.confirmed_at, now());
+    return new;
+  end if;
+
+  if old.to_user_id <> auth.uid() then
+    raise exception 'Only receiver can confirm transfer';
+  end if;
+
+  if new.amount <> old.amount
+    or new.direction <> old.direction then
     raise exception 'Only transfer confirmation fields can be updated';
   end if;
 
@@ -756,6 +765,12 @@ using (
     join public.team_members tm on tm.team_id = e.team_id
     where e.id = event_participants.event_id
     and tm.user_id = auth.uid()
+  )
+  or exists (
+    select 1
+    from public.users u
+    where u.id = auth.uid()
+      and lower(coalesce(u.role, '')) in ('admin', 'sub_admin')
   )
 );
 
