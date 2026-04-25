@@ -1,6 +1,7 @@
 export { SignupPage } from './SignupPage'
 export { LoginPage } from './LoginPage'
 export { ForgotPasswordPage } from './ForgotPasswordPage'
+export { ResetPasswordPage } from './ResetPasswordPage'
 export { HomePage } from './HomePage'
 export { EventsPage } from './EventsPage'
 export { ScoresPage } from './ScoresPage'
