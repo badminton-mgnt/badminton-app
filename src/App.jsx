@@ -11,6 +11,7 @@ import {
   EventsPage,
   ScoresPage,
   EventDetailPage,
+  NotificationsPage,
   ProfilePage,
   ManagePage,
   TeamPage,
@@ -61,6 +62,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <EventDetailPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/notifications"
+              element={
+                <ProtectedRoute>
+                  <NotificationsPage />
                 </ProtectedRoute>
               }
             />

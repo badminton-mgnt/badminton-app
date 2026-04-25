@@ -14,10 +14,10 @@ import {
   getTeamMembers,
   getPaymentInfo,
   removeEventParticipant,
+  rejectPaymentTransfer,
   getUserProfile,
   updateExpenseStatus,
   updateEvent,
-  updatePaymentTransfer,
 } from '../lib/api'
 import {
   forgetCheckedInEvent,
@@ -86,107 +86,6 @@ export const EventDetailPage = () => {
   const isParticipantCheckedIn = (participant) =>
     Boolean(participant?.checked_in)
 
-  const syncTreasurerContributionTransfer = async ({
-    eventData,
-    participantsData,
-    expensesData,
-    transfersData,
-    treasuryUserId,
-  }) => {
-    const normalizedEventStatus = String(eventData?.status || '').toUpperCase()
-    const canSyncSettlement = ['FINALIZED', 'COMPLETED'].includes(normalizedEventStatus)
-
-    if (!canSyncSettlement || !treasuryUserId) {
-      return transfersData
-    }
-
-    const checkedInParticipants = (participantsData || []).filter((participant) => isParticipantCheckedIn(participant))
-    const treasurerCheckedIn = checkedInParticipants.some(
-      (participant) => String(participant.user_id) === String(treasuryUserId)
-    )
-
-    if (!treasurerCheckedIn) {
-      return transfersData
-    }
-
-    const approvedExpenses = (expensesData || []).filter((expense) => expense.status === 'APPROVED')
-    const totalExpense = approvedExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0)
-    const treasurerShareAmount = checkedInParticipants.length > 0
-      ? Math.round((totalExpense / checkedInParticipants.length) * 100) / 100
-      : 0
-
-    const treasurerApprovedExpenseTotal = approvedExpenses
-      .filter((expense) => String(expense.user_id) === String(treasuryUserId))
-      .reduce((sum, expense) => sum + Number(expense.amount || 0), 0)
-    const treasurerPreSettlementBalance = treasurerApprovedExpenseTotal - treasurerShareAmount
-    const desiredDirection = treasurerPreSettlementBalance > 0
-      ? 'FROM_TREASURY'
-      : treasurerPreSettlementBalance < 0
-      ? 'TO_TREASURY'
-      : null
-    const desiredAmount = Math.round(Math.abs(treasurerPreSettlementBalance) * 100) / 100
-
-    const implicitTransfer = (transfersData || []).find(
-      (transfer) =>
-        String(transfer.from_user_id) === String(treasuryUserId) &&
-        String(transfer.to_user_id) === String(treasuryUserId) &&
-        ['FROM_TREASURY', 'TO_TREASURY'].includes(String(transfer.direction || '').toUpperCase())
-    )
-
-    if (!desiredDirection || desiredAmount <= 0.01) {
-      if (!implicitTransfer) {
-        return transfersData
-      }
-
-      const shouldResetAmount = Math.abs(Number(implicitTransfer.amount || 0)) >= 0.01
-      const shouldUpdateStatus = String(implicitTransfer.status || '').toUpperCase() !== 'CONFIRMED'
-
-      if (!shouldResetAmount && !shouldUpdateStatus) {
-        return transfersData
-      }
-
-      await updatePaymentTransfer(implicitTransfer.id, {
-        amount: 0,
-        status: 'CONFIRMED',
-        confirmed_at: implicitTransfer.confirmed_at || new Date().toISOString(),
-      })
-
-      return getEventPaymentTransfers(eventId)
-    }
-
-    if (implicitTransfer) {
-      const shouldUpdateAmount = Math.abs(Number(implicitTransfer.amount || 0) - desiredAmount) >= 0.01
-      const shouldUpdateDirection = String(implicitTransfer.direction || '').toUpperCase() !== desiredDirection
-      const shouldUpdateStatus = String(implicitTransfer.status || '').toUpperCase() !== 'CONFIRMED'
-
-      if (!shouldUpdateAmount && !shouldUpdateDirection && !shouldUpdateStatus) {
-        return transfersData
-      }
-
-      await updatePaymentTransfer(implicitTransfer.id, {
-        amount: desiredAmount,
-        direction: desiredDirection,
-        status: 'CONFIRMED',
-        confirmed_at: implicitTransfer.confirmed_at || new Date().toISOString(),
-      })
-
-      return getEventPaymentTransfers(eventId)
-    }
-
-    await createPaymentTransfer({
-      team_id: eventData.team_id,
-      event_id: eventId,
-      from_user_id: treasuryUserId,
-      to_user_id: treasuryUserId,
-      amount: desiredAmount,
-      direction: desiredDirection,
-      status: 'CONFIRMED',
-      confirmed_at: new Date().toISOString(),
-    })
-
-    return getEventPaymentTransfers(eventId)
-  }
-
   const loadData = async () => {
     try {
       setLoadError('')
@@ -236,20 +135,6 @@ export const EventDetailPage = () => {
         setTeamMembers([])
         setTeamMemberCount(0)
         setTeamTreasurerId(null)
-      }
-
-      if (eventData?.team_id && participantsData && expensesData && transfersData && treasuryUserId) {
-        try {
-          transfersData = await syncTreasurerContributionTransfer({
-            eventData,
-            participantsData,
-            expensesData,
-            transfersData,
-            treasuryUserId,
-          })
-        } catch (syncError) {
-          console.warn('Treasury contribution sync warning:', syncError)
-        }
       }
 
       if (participantsData) {
@@ -494,11 +379,23 @@ export const EventDetailPage = () => {
 
   const handleConfirmPaymentReceived = async (transferId) => {
     try {
-      setPaymentActionId(transferId)
+      setPaymentActionId(`confirm-${transferId}`)
       await confirmPaymentTransfer(transferId)
       await loadData()
     } catch (error) {
       console.error('Error confirming payment:', error)
+    } finally {
+      setPaymentActionId(null)
+    }
+  }
+
+  const handleMarkPaymentNotReceived = async (transferId) => {
+    try {
+      setPaymentActionId(`reject-${transferId}`)
+      await rejectPaymentTransfer(transferId)
+      await loadData()
+    } catch (error) {
+      console.error('Error rejecting payment:', error)
     } finally {
       setPaymentActionId(null)
     }
@@ -545,6 +442,10 @@ export const EventDetailPage = () => {
           return
         }
 
+        const isTreasurerSelfTransfer =
+          Boolean(isTeamTreasurer) &&
+          String(user.id).toLowerCase() === String(teamTreasurerId).toLowerCase()
+
         await createPaymentTransfer({
           team_id: event.team_id,
           event_id: eventId,
@@ -552,7 +453,8 @@ export const EventDetailPage = () => {
           to_user_id: teamTreasurerId,
           amount: transferAmount,
           direction: 'TO_TREASURY',
-          status: 'WAITING_CONFIRM',
+          status: isTreasurerSelfTransfer ? 'CONFIRMED' : 'WAITING_CONFIRM',
+          confirmed_at: isTreasurerSelfTransfer ? new Date().toISOString() : null,
         })
       } else if (paymentModalMode === 'PAY_MEMBER') {
         if (!paymentTarget?.user_id || payoutTransferAmount <= 0 || !teamTreasurerId) {
@@ -875,8 +777,6 @@ export const EventDetailPage = () => {
       ? 'Settlement is locked until admin/treasurer marks Joining Closed.'
       : userPaymentStatus === 'waiting_confirm'
       ? `Transferred đ ${formatVndAmount(Number(latestWaitingUserToTreasuryTransfer?.amount || waitingUserToTreasuryAmount || 0))} - waiting for treasurer confirmation`
-      : isTeamTreasurer
-      ? 'Treasurer payments are managed in the Treasury section.'
       : normalizedBalance < 0
       ? 'You need to pay this amount.'
       : normalizedBalance > 0
@@ -1284,29 +1184,27 @@ export const EventDetailPage = () => {
                 </Card>
               </div>
 
-              {!isTeamTreasurer && (
-                <Card className={`mt-3 ${normalizedBalance < 0 ? 'bg-error-50 border-error-200' : 'bg-success-50 border-success-200'}`}>
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <p className="text-xs text-neutral-600">Payment Status</p>
-                      <Badge status={userPaymentStatusBadge} className={paymentStatusBadgeClassName}>{userPaymentStatusLabel}</Badge>
-                      <p className={`mt-2 text-xs ${userPaymentStatus === 'waiting_confirm' ? 'text-warning-900' : 'text-neutral-600'}`}>
-                        {paymentStatusHint}
-                      </p>
-                    </div>
-                    {normalizedBalance < 0 && isCheckedIn && (
-                      <Button
-                        onClick={handleOpenTreasuryTransferModal}
-                        variant="secondary"
-                        className="w-full border border-warning-400 sm:w-auto"
-                        disabled={!canRunSettlement || userPaymentStatus === 'waiting_confirm' || transferAmount <= 0 || !treasuryUserId}
-                      >
-                        {paymentActionLabel}
-                      </Button>
-                    )}
+              <Card className={`mt-3 ${normalizedBalance < 0 ? 'bg-error-50 border-error-200' : 'bg-success-50 border-success-200'}`}>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-xs text-neutral-600">Payment Status</p>
+                    <Badge status={userPaymentStatusBadge} className={paymentStatusBadgeClassName}>{userPaymentStatusLabel}</Badge>
+                    <p className={`mt-2 text-xs ${userPaymentStatus === 'waiting_confirm' ? 'text-warning-900' : 'text-neutral-600'}`}>
+                      {paymentStatusHint}
+                    </p>
                   </div>
-                </Card>
-              )}
+                  {normalizedBalance < 0 && isCheckedIn && (
+                    <Button
+                      onClick={handleOpenTreasuryTransferModal}
+                      variant="secondary"
+                      className="w-full border border-warning-400 sm:w-auto"
+                      disabled={!canRunSettlement || userPaymentStatus === 'waiting_confirm' || transferAmount <= 0 || !treasuryUserId}
+                    >
+                      {paymentActionLabel}
+                    </Button>
+                  )}
+                </div>
+              </Card>
 
               {waitingIncomingPayoutTransfer && (
                 <Card className="mt-3 space-y-2 bg-warning-50 border-warning-200">
@@ -1314,15 +1212,26 @@ export const EventDetailPage = () => {
                   <p className="text-sm text-neutral-700">
                     {`Treasury marked transfer: đ ${formatVndAmount(waitingIncomingPayoutTransfer.amount)}. Confirm when received.`}
                   </p>
-                  <Button
-                    onClick={() => handleConfirmPaymentReceived(waitingIncomingPayoutTransfer.id)}
-                    variant="secondary"
-                    className="w-full border border-warning-400 sm:w-auto"
-                    loading={paymentActionId === waitingIncomingPayoutTransfer.id}
-                    disabled={paymentActionId === waitingIncomingPayoutTransfer.id}
-                  >
-                    Confirm Received
-                  </Button>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <Button
+                      onClick={() => handleConfirmPaymentReceived(waitingIncomingPayoutTransfer.id)}
+                      variant="secondary"
+                      className="w-full border border-warning-400 sm:w-auto"
+                      loading={paymentActionId === `confirm-${waitingIncomingPayoutTransfer.id}`}
+                      disabled={Boolean(paymentActionId)}
+                    >
+                      Confirm Received
+                    </Button>
+                    <Button
+                      onClick={() => handleMarkPaymentNotReceived(waitingIncomingPayoutTransfer.id)}
+                      variant="danger"
+                      className="w-full sm:w-auto"
+                      loading={paymentActionId === `reject-${waitingIncomingPayoutTransfer.id}`}
+                      disabled={Boolean(paymentActionId)}
+                    >
+                      Not Received Yet
+                    </Button>
+                  </div>
                 </Card>
               )}
               {normalizedBalance < 0 && isCheckedIn && !treasuryUserId && (
@@ -1379,9 +1288,9 @@ export const EventDetailPage = () => {
                             type="button"
                             className="badge bg-success-50 text-success-700 transition hover:opacity-90 disabled:opacity-50"
                             onClick={() => handleConfirmPaymentReceived(payment.id)}
-                            disabled={paymentActionId === payment.id}
+                            disabled={paymentActionId === `confirm-${payment.id}`}
                           >
-                            {paymentActionId === payment.id ? '...' : 'Confirm Received'}
+                            {paymentActionId === `confirm-${payment.id}` ? '...' : 'Confirm Received'}
                           </button>
                         ) : (
                           <Badge status="warning">Waiting Treasurer</Badge>

@@ -699,6 +699,92 @@ export const confirmPaymentTransfer = async (transferId) => {
   return data[0]
 }
 
+export const rejectPaymentTransfer = async (transferId) => {
+  const { data, error } = await supabase
+    .from('payment_transfers')
+    .update({ status: 'REJECTED', confirmed_at: null })
+    .eq('id', transferId)
+    .select()
+
+  if (error) throw error
+  if (!data?.length) {
+    throw new Error('Unable to reject transfer. This action may be blocked by database permissions.')
+  }
+  return data[0]
+}
+
+export const getNotifications = async (recentReadLimit = 10) => {
+  const [{ data: unreadNotifications, error: unreadError }, { data: recentReadNotifications, error: recentReadError }] = await Promise.all([
+    supabase
+      .from('notifications')
+      .select('*')
+      .eq('is_read', false)
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('notifications')
+      .select('*')
+      .eq('is_read', true)
+      .order('created_at', { ascending: false })
+      .limit(recentReadLimit),
+  ])
+
+  if (unreadError) throw unreadError
+  if (recentReadError) throw recentReadError
+
+  const notifications = [...(unreadNotifications || []), ...(recentReadNotifications || [])]
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+
+  const actorUserIds = [
+    ...new Set((notifications || []).map((item) => item.actor_user_id).filter(Boolean)),
+  ]
+
+  if (actorUserIds.length === 0) {
+    return notifications || []
+  }
+
+  const { data: actorUsers, error: actorUsersError } = await supabase
+    .from('users')
+    .select('id, name')
+    .in('id', actorUserIds)
+
+  if (actorUsersError) throw actorUsersError
+
+  const actorUsersById = new Map((actorUsers || []).map((item) => [String(item.id), item]))
+
+  return (notifications || []).map((item) => ({
+    ...item,
+    actor_user: item.actor_user_id ? actorUsersById.get(String(item.actor_user_id)) || null : null,
+  }))
+}
+
+export const getUnreadNotificationCount = async () => {
+  const { count, error } = await supabase
+    .from('notifications')
+    .select('id', { count: 'exact', head: true })
+    .eq('is_read', false)
+
+  if (error) throw error
+  return count || 0
+}
+
+export const markAllNotificationsAsRead = async () => {
+  const { error } = await supabase
+    .from('notifications')
+    .update({ is_read: true, read_at: new Date().toISOString() })
+    .eq('is_read', false)
+
+  if (error) throw error
+}
+
+export const markNotificationAsRead = async (notificationId) => {
+  const { error } = await supabase
+    .from('notifications')
+    .update({ is_read: true, read_at: new Date().toISOString() })
+    .eq('id', notificationId)
+
+  if (error) throw error
+}
+
 // Payment Info functions
 export const setPaymentInfo = async (userId, paymentInfo) => {
   const { data, error } = await supabase
