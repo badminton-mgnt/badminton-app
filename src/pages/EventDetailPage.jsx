@@ -32,6 +32,9 @@ import { useAuth } from '../contexts/AuthContext'
 
 const CHECKIN_PAYMENT_WINDOW_DAYS = 3
 const DAY_IN_MS = 24 * 60 * 60 * 1000
+const TEXT_INPUT_MAX_LENGTH = 100
+const COURT_NUMBER_MAX_LENGTH = 2
+const NUMERIC_INPUT_MAX_LENGTH = 20
 
 export const EventDetailPage = () => {
   const { eventId } = useParams()
@@ -1740,7 +1743,8 @@ export const EventDetailPage = () => {
           <Input
             label="Event Title"
             value={eventForm.title}
-            onChange={(e) => setEventForm((prev) => ({ ...prev, title: e.target.value }))}
+            onChange={(e) => setEventForm((prev) => ({ ...prev, title: e.target.value.slice(0, TEXT_INPUT_MAX_LENGTH) }))}
+            maxLength={TEXT_INPUT_MAX_LENGTH}
             placeholder="e.g., Morning Session"
           />
           <Input
@@ -1752,14 +1756,19 @@ export const EventDetailPage = () => {
           <Input
             label="Location"
             value={eventForm.location}
-            onChange={(e) => setEventForm((prev) => ({ ...prev, location: e.target.value }))}
+            onChange={(e) => setEventForm((prev) => ({ ...prev, location: e.target.value.slice(0, TEXT_INPUT_MAX_LENGTH) }))}
+            maxLength={TEXT_INPUT_MAX_LENGTH}
             placeholder="Where will it be?"
           />
           <Input
             label="Court Number"
             type="number"
             value={eventForm.court_number}
-            onChange={(e) => setEventForm((prev) => ({ ...prev, court_number: e.target.value }))}
+            onChange={(e) => setEventForm((prev) => ({
+              ...prev,
+              court_number: e.target.value.replace(/\D/g, '').slice(0, COURT_NUMBER_MAX_LENGTH),
+            }))}
+            maxLength={COURT_NUMBER_MAX_LENGTH}
             placeholder="1"
           />
         </div>
@@ -1793,14 +1802,22 @@ export const EventDetailPage = () => {
           <Input
             label="Description"
             value={expenseForm.description}
-            onChange={(e) => setExpenseForm((prev) => ({ ...prev, description: e.target.value }))}
+            onChange={(e) => setExpenseForm((prev) => ({
+              ...prev,
+              description: e.target.value.slice(0, TEXT_INPUT_MAX_LENGTH),
+            }))}
+            maxLength={TEXT_INPUT_MAX_LENGTH}
             placeholder="What is this for?"
           />
           <Input
             label="Amount"
             type="number"
             value={expenseForm.amount}
-            onChange={(e) => setExpenseForm((prev) => ({ ...prev, amount: e.target.value }))}
+            onChange={(e) => setExpenseForm((prev) => ({
+              ...prev,
+              amount: e.target.value.slice(0, NUMERIC_INPUT_MAX_LENGTH),
+            }))}
+            maxLength={NUMERIC_INPUT_MAX_LENGTH}
             placeholder="0.00"
           />
         </div>

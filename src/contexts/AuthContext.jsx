@@ -2,7 +2,14 @@ import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 
 const AuthContext = createContext()
-const SESSION_MAX_AGE_MS = 30 * 60 * 1000
+const SESSION_MAX_AGE_MINUTES = Number(import.meta.env.VITE_SESSION_MAX_AGE_MINUTES || 30)
+const SESSION_CHECK_INTERVAL_MINUTES = Number(import.meta.env.VITE_SESSION_CHECK_INTERVAL_MINUTES || 10)
+const SESSION_MAX_AGE_MS = Number.isFinite(SESSION_MAX_AGE_MINUTES) && SESSION_MAX_AGE_MINUTES > 0
+  ? SESSION_MAX_AGE_MINUTES * 60 * 1000
+  : null
+const SESSION_CHECK_INTERVAL_MS = Number.isFinite(SESSION_CHECK_INTERVAL_MINUTES) && SESSION_CHECK_INTERVAL_MINUTES > 0
+  ? SESSION_CHECK_INTERVAL_MINUTES * 60 * 1000
+  : 10 * 60 * 1000
 const SESSION_STARTED_AT_KEY = 'auth_session_started_at'
 
 const getSessionStartedAt = (session) => {
@@ -36,7 +43,9 @@ export const AuthProvider = ({ children }) => {
     let isMounted = true
     let intervalId
 
-    const hasSessionExpired = (startedAt) => Date.now() - startedAt >= SESSION_MAX_AGE_MS
+    const hasSessionExpired = (startedAt) => (
+      typeof SESSION_MAX_AGE_MS === 'number' && Date.now() - startedAt >= SESSION_MAX_AGE_MS
+    )
 
     const forceSignOut = async () => {
       if (isSigningOutRef.current) return
@@ -54,6 +63,10 @@ export const AuthProvider = ({ children }) => {
     }
 
     const resolveSessionStartedAt = (session) => {
+      if (typeof SESSION_MAX_AGE_MS !== 'number') {
+        return null
+      }
+
       const storedStartedAt = getStoredSessionStartedAt()
       const sessionStartedAt = getSessionStartedAt(session)
       const resolvedStartedAt = storedStartedAt ?? sessionStartedAt
@@ -72,6 +85,14 @@ export const AuthProvider = ({ children }) => {
         clearSessionStartedAt()
         if (isMounted) {
           setUser(null)
+        }
+        return
+      }
+
+      if (typeof SESSION_MAX_AGE_MS !== 'number') {
+        clearSessionStartedAt()
+        if (isMounted) {
+          setUser(session.user)
         }
         return
       }
@@ -110,16 +131,22 @@ export const AuthProvider = ({ children }) => {
         }
 
         if (event === 'SIGNED_IN' && session) {
-          persistSessionStartedAt(getSessionStartedAt(session))
+          if (typeof SESSION_MAX_AGE_MS === 'number') {
+            persistSessionStartedAt(getSessionStartedAt(session))
+          } else {
+            clearSessionStartedAt()
+          }
         }
 
         void enforceSessionLimit(session)
       }
     )
 
-    intervalId = window.setInterval(() => {
-      void enforceSessionLimit()
-    }, 60 * 1000)
+    if (typeof SESSION_MAX_AGE_MS === 'number') {
+      intervalId = window.setInterval(() => {
+        void enforceSessionLimit()
+      }, SESSION_CHECK_INTERVAL_MS)
+    }
 
     return () => {
       isMounted = false

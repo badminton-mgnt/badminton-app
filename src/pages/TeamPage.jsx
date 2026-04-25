@@ -8,6 +8,8 @@ import { useAuth } from '../contexts/AuthContext'
 import { useTeam } from '../contexts/TeamContext'
 import { formatBangkokDateTime } from '../lib/dateTime'
 
+const TEXT_INPUT_MAX_LENGTH = 100
+
 export const TeamPage = () => {
   const { teamId } = useParams()
   const navigate = useNavigate()
@@ -390,7 +392,8 @@ export const TeamPage = () => {
             </label>
             <textarea
               value={deleteReason}
-              onChange={(e) => setDeleteReason(e.target.value)}
+              onChange={(e) => setDeleteReason(e.target.value.slice(0, TEXT_INPUT_MAX_LENGTH))}
+              maxLength={TEXT_INPUT_MAX_LENGTH}
               placeholder="Explain why this team is being deleted"
               className="input-field min-h-28 resize-none"
             />
