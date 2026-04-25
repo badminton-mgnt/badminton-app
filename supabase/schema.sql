@@ -119,8 +119,23 @@ CREATE TABLE payment_transfers (
   to_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   amount NUMERIC(10, 2) NOT NULL,
   direction TEXT NOT NULL CHECK (direction IN ('TO_TREASURY', 'FROM_TREASURY')),
-  status TEXT DEFAULT 'WAITING_CONFIRM' CHECK (status IN ('WAITING_CONFIRM', 'CONFIRMED')),
+  status TEXT DEFAULT 'WAITING_CONFIRM' CHECK (status IN ('WAITING_CONFIRM', 'CONFIRMED', 'REJECTED')),
   confirmed_at TIMESTAMP,
+  created_at TIMESTAMP DEFAULT now()
+);
+
+-- Create Notifications Table
+CREATE TABLE IF NOT EXISTS notifications (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  recipient_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  actor_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  link_path TEXT,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  is_read BOOLEAN NOT NULL DEFAULT false,
+  read_at TIMESTAMP,
   created_at TIMESTAMP DEFAULT now()
 );
 
@@ -159,6 +174,7 @@ alter table public.payment_transfers enable row level security;
 alter table public.payment_info enable row level security;
 alter table public.event_participants enable row level security;
 alter table public.event_match_scores enable row level security;
+alter table public.notifications enable row level security;
 alter table public.event_participants add column if not exists checked_in_by uuid references public.users(id) on delete set null;
 alter table public.events add column if not exists expenses_closed_at timestamp;
 alter table public.events add column if not exists expenses_closed_by uuid references public.users(id) on delete set null;
@@ -636,8 +652,10 @@ using (
 )
 with check (
   to_user_id = auth.uid()
-  and status = 'CONFIRMED'
-  and confirmed_at is not null
+  and (
+    (status = 'CONFIRMED' and confirmed_at is not null)
+    or (status = 'REJECTED' and confirmed_at is null)
+  )
 );
 
 create or replace function public.restrict_payment_transfer_confirmation_update()
@@ -676,15 +694,19 @@ begin
     raise exception 'Only transfer confirmation fields can be updated';
   end if;
 
-  if new.status <> 'CONFIRMED' then
-    raise exception 'Transfer status must be CONFIRMED';
+  if new.status not in ('CONFIRMED', 'REJECTED') then
+    raise exception 'Transfer status must be CONFIRMED or REJECTED';
   end if;
 
-  if old.status = 'CONFIRMED' then
-    raise exception 'Transfer already confirmed';
+  if old.status in ('CONFIRMED', 'REJECTED') then
+    raise exception 'Transfer already finalized';
   end if;
 
-  new.confirmed_at := coalesce(new.confirmed_at, now());
+  if new.status = 'CONFIRMED' then
+    new.confirmed_at := coalesce(new.confirmed_at, now());
+  else
+    new.confirmed_at := null;
+  end if;
 
   return new;
 end;
@@ -742,6 +764,26 @@ to authenticated
 using (auth.uid() = user_id)
 with check (auth.uid() = user_id);
 
+
+-- =====================================================
+-- 11. NOTIFICATIONS
+-- =====================================================
+
+drop policy if exists "view own notifications" on public.notifications;
+drop policy if exists "update own notifications" on public.notifications;
+
+create policy "view own notifications"
+on public.notifications
+for select
+to authenticated
+using (recipient_user_id = auth.uid());
+
+create policy "update own notifications"
+on public.notifications
+for update
+to authenticated
+using (recipient_user_id = auth.uid())
+with check (recipient_user_id = auth.uid());
 
 -- =====================================================
 -- 10. EVENT PARTICIPANTS
@@ -967,6 +1009,475 @@ before update on public.expenses
 for each row
 execute function public.set_expense_approval_meta();
 
+create or replace function public.create_notification(
+  p_recipient_user_id uuid,
+  p_actor_user_id uuid,
+  p_type text,
+  p_title text,
+  p_message text,
+  p_link_path text default null,
+  p_metadata jsonb default '{}'::jsonb
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if p_recipient_user_id is null then
+    return;
+  end if;
+
+  insert into public.notifications (
+    recipient_user_id,
+    actor_user_id,
+    type,
+    title,
+    message,
+    link_path,
+    metadata
+  )
+  values (
+    p_recipient_user_id,
+    p_actor_user_id,
+    p_type,
+    p_title,
+    p_message,
+    p_link_path,
+    coalesce(p_metadata, '{}'::jsonb)
+  );
+end;
+$$;
+
+create or replace function public.notify_payment_transfer_created()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_actor_name text;
+begin
+  if new.to_user_id is null or new.to_user_id = new.from_user_id then
+    return new;
+  end if;
+
+  select u.name into v_actor_name
+  from public.users u
+  where u.id = new.from_user_id;
+
+  perform public.create_notification(
+    new.to_user_id,
+    new.from_user_id,
+    'PAYMENT_RECEIVED',
+    'You received a transfer',
+    format(
+      '%s transferred đ %s to you. Tap to view and confirm receipt.',
+      coalesce(v_actor_name, 'A teammate'),
+      to_char(round(coalesce(new.amount, 0))::numeric, 'FM999,999,999,990')
+    ),
+    '/event/' || new.event_id::text,
+    jsonb_build_object('transfer_id', new.id, 'event_id', new.event_id, 'team_id', new.team_id)
+  );
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_notify_payment_transfer_created on public.payment_transfers;
+create trigger trg_notify_payment_transfer_created
+after insert on public.payment_transfers
+for each row
+execute function public.notify_payment_transfer_created();
+
+create or replace function public.notify_payment_transfer_response()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_actor_name text;
+  v_event_title text;
+  v_type text;
+  v_title text;
+  v_message text;
+begin
+  if old.status is not distinct from new.status then
+    return new;
+  end if;
+
+  if new.status not in ('CONFIRMED', 'REJECTED') then
+    return new;
+  end if;
+
+  if new.from_user_id is null or new.from_user_id = new.to_user_id then
+    return new;
+  end if;
+
+  select u.name into v_actor_name
+  from public.users u
+  where u.id = new.to_user_id;
+
+  select e.title into v_event_title
+  from public.events e
+  where e.id = new.event_id;
+
+  if new.status = 'CONFIRMED' then
+    v_type := 'PAYMENT_CONFIRMED_BY_RECEIVER';
+    v_title := 'Receiver confirmed payment';
+    v_message := format('%s confirmed receiving your transfer for event "%s".', coalesce(v_actor_name, 'Receiver'), coalesce(v_event_title, 'an event'));
+  else
+    v_type := 'PAYMENT_REJECTED_BY_RECEIVER';
+    v_title := 'Receiver has not received payment yet';
+    v_message := format('%s marked your transfer as not received for event "%s".', coalesce(v_actor_name, 'Receiver'), coalesce(v_event_title, 'an event'));
+  end if;
+
+  perform public.create_notification(
+    new.from_user_id,
+    new.to_user_id,
+    v_type,
+    v_title,
+    v_message,
+    '/event/' || new.event_id::text,
+    jsonb_build_object('transfer_id', new.id, 'event_id', new.event_id, 'team_id', new.team_id, 'status', new.status)
+  );
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_notify_payment_transfer_response on public.payment_transfers;
+create trigger trg_notify_payment_transfer_response
+after update on public.payment_transfers
+for each row
+execute function public.notify_payment_transfer_response();
+
+create or replace function public.notify_team_member_added()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_actor_id uuid;
+  v_actor_name text;
+  v_team_name text;
+begin
+  v_actor_id := auth.uid();
+
+  if new.user_id = v_actor_id then
+    return new;
+  end if;
+
+  select u.name into v_actor_name from public.users u where u.id = v_actor_id;
+  select t.name into v_team_name from public.teams t where t.id = new.team_id;
+
+  perform public.create_notification(
+    new.user_id,
+    v_actor_id,
+    'TEAM_MEMBER_ADDED',
+    'Added to team',
+    format('%s added you to team "%s".', coalesce(v_actor_name, 'A teammate'), coalesce(v_team_name, 'your team')),
+    '/team/' || new.team_id::text,
+    jsonb_build_object('team_id', new.team_id)
+  );
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_notify_team_member_added on public.team_members;
+create trigger trg_notify_team_member_added
+after insert on public.team_members
+for each row
+execute function public.notify_team_member_added();
+
+create or replace function public.notify_event_participant_checked_in()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_actor_id uuid;
+  v_actor_name text;
+  v_event_title text;
+begin
+  v_actor_id := coalesce(new.checked_in_by, auth.uid());
+
+  if new.user_id = v_actor_id then
+    return new;
+  end if;
+
+  if tg_op = 'INSERT' and not coalesce(new.checked_in, false) then
+    return new;
+  end if;
+
+  if tg_op = 'UPDATE' and (
+    coalesce(old.checked_in, false) = coalesce(new.checked_in, false)
+    or not coalesce(new.checked_in, false)
+  ) then
+    return new;
+  end if;
+
+  select u.name into v_actor_name from public.users u where u.id = v_actor_id;
+  select e.title into v_event_title from public.events e where e.id = new.event_id;
+
+  perform public.create_notification(
+    new.user_id,
+    v_actor_id,
+    'EVENT_PARTICIPANT_ADDED',
+    'Checked in to event',
+    format('%s checked you in for event "%s".', coalesce(v_actor_name, 'A teammate'), coalesce(v_event_title, 'an event')),
+    '/event/' || new.event_id::text,
+    jsonb_build_object('event_id', new.event_id)
+  );
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_notify_event_participant_checked_in on public.event_participants;
+create trigger trg_notify_event_participant_checked_in
+after insert or update on public.event_participants
+for each row
+execute function public.notify_event_participant_checked_in();
+
+create or replace function public.notify_team_for_event_changes()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_actor_id uuid;
+  v_actor_name text;
+  v_title text;
+  v_message text;
+  v_type text;
+  v_link text;
+  v_team_id uuid;
+  v_event_id uuid;
+  v_recipient record;
+begin
+  v_actor_id := auth.uid();
+  select u.name into v_actor_name from public.users u where u.id = v_actor_id;
+
+  if tg_op = 'INSERT' then
+    v_type := 'EVENT_CREATED';
+    v_title := 'New event created';
+    v_message := format('%s created event "%s".', coalesce(v_actor_name, 'A teammate'), coalesce(new.title, 'New Event'));
+    v_link := '/event/' || new.id::text;
+    v_team_id := new.team_id;
+    v_event_id := new.id;
+  elsif tg_op = 'UPDATE' and old.status is distinct from new.status and upper(coalesce(new.status, '')) = 'CANCELLED' then
+    v_type := 'EVENT_CANCELLED';
+    v_title := 'Event cancelled';
+    v_message := format('%s cancelled event "%s".', coalesce(v_actor_name, 'A teammate'), coalesce(new.title, 'An event'));
+    v_link := '/event/' || new.id::text;
+    v_team_id := new.team_id;
+    v_event_id := new.id;
+  elsif tg_op = 'UPDATE' and old.status is distinct from new.status and upper(coalesce(new.status, '')) = 'COMPLETED' then
+    v_type := 'EVENT_SETTLEMENT_COMPLETED';
+    v_title := 'Settlement completed';
+    v_message := format('Settlement for event "%s" is completed.', coalesce(new.title, 'an event'));
+    v_link := '/event/' || new.id::text;
+    v_team_id := new.team_id;
+    v_event_id := new.id;
+  elsif tg_op = 'DELETE' then
+    v_type := 'EVENT_DELETED';
+    v_title := 'Event deleted';
+    v_message := format('%s deleted event "%s".', coalesce(v_actor_name, 'A teammate'), coalesce(old.title, 'An event'));
+    v_link := '/events';
+    v_team_id := old.team_id;
+    v_event_id := old.id;
+  else
+    return case when tg_op = 'DELETE' then old else new end;
+  end if;
+
+  for v_recipient in
+    select tm.user_id
+    from public.team_members tm
+    where tm.team_id = v_team_id
+      and (v_actor_id is null or tm.user_id <> v_actor_id)
+  loop
+    perform public.create_notification(
+      v_recipient.user_id,
+      v_actor_id,
+      v_type,
+      v_title,
+      v_message,
+      v_link,
+      jsonb_build_object('team_id', v_team_id, 'event_id', v_event_id)
+    );
+  end loop;
+
+  return case when tg_op = 'DELETE' then old else new end;
+end;
+$$;
+
+drop trigger if exists trg_notify_event_created on public.events;
+create trigger trg_notify_event_created
+after insert on public.events
+for each row
+execute function public.notify_team_for_event_changes();
+
+drop trigger if exists trg_notify_event_status_changes on public.events;
+create trigger trg_notify_event_status_changes
+after update on public.events
+for each row
+execute function public.notify_team_for_event_changes();
+
+drop trigger if exists trg_notify_event_deleted on public.events;
+create trigger trg_notify_event_deleted
+before delete on public.events
+for each row
+execute function public.notify_team_for_event_changes();
+
+create or replace function public.notify_team_deleted()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_actor_id uuid;
+  v_actor_name text;
+  v_recipient record;
+begin
+  v_actor_id := auth.uid();
+  select u.name into v_actor_name from public.users u where u.id = v_actor_id;
+
+  for v_recipient in
+    select tm.user_id
+    from public.team_members tm
+    where tm.team_id = old.id
+  loop
+    perform public.create_notification(
+      v_recipient.user_id,
+      v_actor_id,
+      'TEAM_DELETED',
+      'Team deleted',
+      format('%s deleted team "%s".', coalesce(v_actor_name, 'An admin'), coalesce(old.name, 'your team')),
+      '/',
+      jsonb_build_object('team_id', old.id, 'team_name', old.name)
+    );
+  end loop;
+
+  return old;
+end;
+$$;
+
+drop trigger if exists trg_notify_team_deleted on public.teams;
+create trigger trg_notify_team_deleted
+before delete on public.teams
+for each row
+execute function public.notify_team_deleted();
+
+create or replace function public.notify_expense_workflow()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_actor_id uuid;
+  v_actor_name text;
+  v_event_title text;
+  v_reviewer record;
+  v_status_upper text;
+begin
+  v_actor_id := auth.uid();
+  select u.name into v_actor_name from public.users u where u.id = v_actor_id;
+
+  if tg_op = 'INSERT' then
+    if upper(coalesce(new.status, 'PENDING')) <> 'PENDING' then
+      return new;
+    end if;
+
+    select e.title into v_event_title
+    from public.events e
+    where e.id = new.event_id;
+
+    perform public.create_notification(
+      new.user_id,
+      v_actor_id,
+      'EXPENSE_REVIEW_PENDING',
+      'Expense submitted',
+      format('Your expense for event "%s" is waiting for review.', coalesce(v_event_title, 'an event')),
+      '/event/' || new.event_id::text,
+      jsonb_build_object('expense_id', new.id, 'event_id', new.event_id, 'team_id', new.team_id)
+    );
+
+    for v_reviewer in
+      select distinct reviewer.user_id
+      from (
+        select t.treasurer_id as user_id
+        from public.teams t
+        where t.id = new.team_id
+
+        union
+
+        select tm.user_id
+        from public.team_members tm
+        join public.users u on u.id = tm.user_id
+        where tm.team_id = new.team_id
+          and lower(coalesce(u.role, '')) in ('admin', 'sub_admin')
+      ) reviewer
+      where reviewer.user_id is not null
+        and (v_actor_id is null or reviewer.user_id <> v_actor_id)
+    loop
+      perform public.create_notification(
+        v_reviewer.user_id,
+        v_actor_id,
+        'EXPENSE_REVIEW_REQUIRED',
+        'Expense needs review',
+        format('%s added an expense for event "%s". Please review it.', coalesce(v_actor_name, 'A teammate'), coalesce(v_event_title, 'an event')),
+        '/event/' || new.event_id::text,
+        jsonb_build_object('expense_id', new.id, 'event_id', new.event_id, 'team_id', new.team_id)
+      );
+    end loop;
+
+    return new;
+  end if;
+
+  if tg_op = 'UPDATE' then
+    v_status_upper := upper(coalesce(new.status, ''));
+    if old.status is distinct from new.status and v_status_upper in ('APPROVED', 'REJECTED') then
+      select e.title into v_event_title
+      from public.events e
+      where e.id = new.event_id;
+
+      perform public.create_notification(
+        new.user_id,
+        v_actor_id,
+        case when v_status_upper = 'APPROVED' then 'EXPENSE_APPROVED' else 'EXPENSE_REJECTED' end,
+        case when v_status_upper = 'APPROVED' then 'Expense approved' else 'Expense rejected' end,
+        format(
+          'Your expense for event "%s" was %s%s.',
+          coalesce(v_event_title, 'an event'),
+          lower(v_status_upper),
+          case when v_actor_name is not null then format(' by %s', v_actor_name) else '' end
+        ),
+        '/event/' || new.event_id::text,
+        jsonb_build_object('expense_id', new.id, 'event_id', new.event_id, 'team_id', new.team_id, 'status', new.status)
+      );
+    end if;
+
+    return new;
+  end if;
+
+  return case when tg_op = 'DELETE' then old else new end;
+end;
+$$;
+
+drop trigger if exists trg_notify_expense_workflow on public.expenses;
+create trigger trg_notify_expense_workflow
+after insert or update on public.expenses
+for each row
+execute function public.notify_expense_workflow();
+
 alter table public.teams
 drop constraint if exists teams_name_check;
 
@@ -981,6 +1492,13 @@ alter table public.events
 add constraint events_status_check
 check (status in ('UPCOMING', 'ONGOING', 'COMPLETED', 'FINALIZED', 'CANCELLED'));
 
+alter table public.payment_transfers
+drop constraint if exists payment_transfers_status_check;
+
+alter table public.payment_transfers
+add constraint payment_transfers_status_check
+check (status in ('WAITING_CONFIRM', 'CONFIRMED', 'REJECTED'));
+
 -- Create Indexes for better performance
 CREATE INDEX idx_team_members_user_id ON team_members(user_id);
 CREATE INDEX idx_team_members_team_id ON team_members(team_id);
@@ -993,3 +1511,6 @@ CREATE INDEX idx_event_participants_event_id ON event_participants(event_id);
 CREATE INDEX idx_event_participants_user_id ON event_participants(user_id);
 CREATE INDEX idx_event_match_scores_event_id ON event_match_scores(event_id);
 CREATE INDEX idx_event_match_scores_team_id ON event_match_scores(team_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_recipient_user_id ON notifications(recipient_user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(recipient_user_id, is_read);
+CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at);
