@@ -249,7 +249,7 @@ export const SignupPage = () => {
                   isEmailMode ? 'bg-white text-primary-400 shadow-sm' : 'text-neutral-600 hover:text-neutral-800'
                 }`}
               >
-                Gmail Signup
+                Email Signup
               </button>
               <button
                 type="button"
@@ -404,7 +404,7 @@ export const SignupPage = () => {
               loading={loading}
               className="w-full"
             >
-              {isEmailMode ? 'Sign Up with Gmail' : 'Sign Up with App Secret'}
+              {isEmailMode ? 'Sign Up with Email' : 'Sign Up with App Secret'}
             </Button>
           </form>
         </Card>
