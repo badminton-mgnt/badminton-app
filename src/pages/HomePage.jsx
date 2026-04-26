@@ -50,8 +50,8 @@ export const HomePage = () => {
     tone: 'default',
     label: 'No Team',
   })
-  const [todayEvent, setTodayEvent] = useState(null)
-  const [todayEventCheckedIn, setTodayEventCheckedIn] = useState(false)
+  const [todayEvents, setTodayEvents] = useState([])
+  const [todayEventCheckedInMap, setTodayEventCheckedInMap] = useState({})
   const [pendingPastCheckInEvents, setPendingPastCheckInEvents] = useState([])
   const [pendingCheckInModalOpen, setPendingCheckInModalOpen] = useState(false)
   const [selectedCheckInEvent, setSelectedCheckInEvent] = useState(null)
@@ -100,8 +100,8 @@ export const HomePage = () => {
 
   useEffect(() => {
     if (!currentTeam) {
-      setTodayEvent(null)
-      setTodayEventCheckedIn(false)
+      setTodayEvents([])
+      setTodayEventCheckedInMap({})
       setPendingPastCheckInEvents([])
       setPendingCheckInModalOpen(false)
       setSelectedCheckInEvent(null)
@@ -160,7 +160,9 @@ export const HomePage = () => {
       const activeEvents = eventsData.filter((event) => event.status !== 'CANCELLED')
       const todayKey = getBangkokDateKey(new Date())
       const now = Date.now()
-      const todayMatch = activeEvents.find((event) => getBangkokDateKey(event.date) === todayKey)
+      const todayMatches = activeEvents
+        .filter((event) => getBangkokDateKey(event.date) === todayKey)
+        .sort((a, b) => new Date(a.date) - new Date(b.date))
       const upcomingEvents = activeEvents.filter((event) => getBangkokDateKey(event.date) > todayKey)
       const pastEventsInGraceWindow = activeEvents.filter((event) => {
         if (!canCheckInEvent(event)) return false
@@ -175,45 +177,55 @@ export const HomePage = () => {
         return now > eventTime + (CHECKIN_PAYMENT_WINDOW_DAYS * DAY_IN_MS)
       })
 
-      setTodayEvent(todayMatch || null)
+      setTodayEvents(todayMatches)
       setUpcomingCount(upcomingEvents.length)
       setHasUpcoming(upcomingEvents.length > 0)
-      setTodayEventCheckedIn(todayMatch ? hasCheckedInEvent(user.id, todayMatch.id) : false)
+      setTodayEventCheckedInMap(
+        Object.fromEntries(
+          todayMatches.map((event) => [String(event.id), hasCheckedInEvent(user.id, event.id)])
+        )
+      )
       setPendingPastCheckInEvents([])
 
-      if (todayMatch) {
-        try {
-          const todayParticipantsData = await getEventParticipants(todayMatch.id)
-          const userCheckedIn = todayParticipantsData.some(
-            (participant) => String(participant.user_id) === String(user.id) && isParticipantCheckedIn(participant)
-          )
+      const todayEventStatuses = await Promise.all(
+        todayMatches.map(async (event) => {
+          try {
+            const participants = await getEventParticipants(event.id)
+            const userCheckedIn = participants.some(
+              (participant) => String(participant.user_id) === String(user.id) && isParticipantCheckedIn(participant)
+            )
 
-          if (userCheckedIn) {
-            rememberCheckedInEvent(user.id, todayMatch.id)
-            forgetDismissedCheckInEvent(user.id, todayMatch.id)
-          } else {
-            forgetCheckedInEvent(user.id, todayMatch.id)
+            if (userCheckedIn) {
+              rememberCheckedInEvent(user.id, event.id)
+              forgetDismissedCheckInEvent(user.id, event.id)
+            } else {
+              forgetCheckedInEvent(user.id, event.id)
+            }
+
+            return { event, userCheckedIn }
+          } catch (error) {
+            console.error('Error loading today event participants:', error)
+            return { event, userCheckedIn: hasCheckedInEvent(user.id, event.id) }
           }
+        })
+      )
 
-          setTodayEventCheckedIn(
-            userCheckedIn
-          )
-        } catch (error) {
-          console.error('Error loading today event participants:', error)
-          setTodayEventCheckedIn(hasCheckedInEvent(user.id, todayMatch.id))
-        }
-      }
+      setTodayEventCheckedInMap(
+        Object.fromEntries(
+          todayEventStatuses.map((item) => [String(item.event.id), item.userCheckedIn])
+        )
+      )
 
       const pendingCheckInEvents = []
-      if (
-        todayMatch &&
-        canCheckInEvent(todayMatch) &&
-        !hasDismissedCheckInEvent(user.id, todayMatch.id) &&
-        !hasCheckedInEvent(user.id, todayMatch.id) &&
-        !todayEventCheckedIn
-      ) {
-        pendingCheckInEvents.push(todayMatch)
-      }
+      todayEventStatuses.forEach(({ event, userCheckedIn }) => {
+        if (
+          canCheckInEvent(event) &&
+          !hasDismissedCheckInEvent(user.id, event.id) &&
+          !userCheckedIn
+        ) {
+          pendingCheckInEvents.push(event)
+        }
+      })
 
       if (pastEventsInGraceWindow.length > 0) {
         const pastEventStatuses = await Promise.all(
@@ -436,8 +448,8 @@ export const HomePage = () => {
       }
     } catch (error) {
       console.error('Error loading team overview:', error)
-      setTodayEvent(null)
-      setTodayEventCheckedIn(false)
+      setTodayEvents([])
+      setTodayEventCheckedInMap({})
       setUpcomingCount(0)
       setHasUpcoming(false)
       setPaymentSummary({
@@ -447,11 +459,6 @@ export const HomePage = () => {
         label: 'Unavailable',
       })
     }
-  }
-
-  const handleTodayEventClick = () => {
-    if (!todayEvent) return
-    handleEventCheckInClick(todayEvent, todayEventCheckedIn)
   }
 
   const handleEventCheckInClick = (event, alreadyCheckedIn = false) => {
@@ -476,10 +483,7 @@ export const HomePage = () => {
 
     rememberDismissedCheckInEvent(user.id, eventToDismiss.id)
     forgetCheckedInEvent(user.id, eventToDismiss.id)
-
-    if (todayEvent && eventToDismiss.id === todayEvent.id) {
-      setTodayEventCheckedIn(false)
-    }
+    setTodayEventCheckedInMap((prev) => ({ ...prev, [String(eventToDismiss.id)]: false }))
 
     setPendingPastCheckInEvents((prev) => prev.filter((event) => event.id !== eventToDismiss.id))
 
@@ -497,9 +501,7 @@ export const HomePage = () => {
       await checkinParticipant(eventToCheckIn.id, user.id)
       rememberCheckedInEvent(user.id, eventToCheckIn.id)
       forgetDismissedCheckInEvent(user.id, eventToCheckIn.id)
-      if (todayEvent && eventToCheckIn.id === todayEvent.id) {
-        setTodayEventCheckedIn(true)
-      }
+      setTodayEventCheckedInMap((prev) => ({ ...prev, [String(eventToCheckIn.id)]: true }))
       setPendingPastCheckInEvents((prev) => prev.filter((event) => event.id !== eventToCheckIn.id))
       setCheckInModalOpen(false)
       setSelectedCheckInEvent(null)
@@ -664,36 +666,44 @@ export const HomePage = () => {
             <Card>
               <p className="text-neutral-600">Select a team to view its events.</p>
             </Card>
-          ) : todayEvent ? (
-            (() => {
-              const todayEventCanCheckIn = canCheckInEvent(todayEvent)
-              return (
-            <Card onClick={handleTodayEventClick} className="cursor-pointer hover:shadow-lg transition">
-              <div className="flex items-start justify-between mb-3">
-                <div>
-                  <h3 className="font-semibold text-lg">{todayEvent.title}</h3>
-                  <p className="text-sm text-neutral-600">
-                    {todayEvent.location || 'Location not set'}
-                    {todayEvent.court_number ? ` - Court ${todayEvent.court_number}` : ''}
-                  </p>
-                </div>
-                <Badge status={todayEventCanCheckIn ? (todayEventCheckedIn ? 'success' : 'warning') : 'default'}>
-                  {todayEventCanCheckIn
-                    ? (todayEventCheckedIn ? 'Checked In' : 'Check In')
-                    : String(todayEvent.status || '').toUpperCase() === 'COMPLETED'
-                    ? 'Completed'
-                    : 'Joining Closed'}
-                </Badge>
-              </div>
-              <p className="text-sm text-neutral-600">{formatBangkokDateTime(todayEvent.date)}</p>
-              <p className="text-xs text-neutral-500 mt-2">
-                {todayEventCanCheckIn
-                  ? (todayEventCheckedIn ? 'Tap to view event details.' : 'Tap to confirm check-in and open this event.')
-                  : 'Tap to view event details.'}
-              </p>
-            </Card>
-              )
-            })()
+          ) : todayEvents.length > 0 ? (
+            <div className="space-y-3">
+              {todayEvents.map((todayEvent) => {
+                const todayEventCanCheckIn = canCheckInEvent(todayEvent)
+                const todayEventCheckedIn = Boolean(todayEventCheckedInMap[String(todayEvent.id)])
+
+                return (
+                  <Card
+                    key={todayEvent.id}
+                    onClick={() => handleEventCheckInClick(todayEvent, todayEventCheckedIn)}
+                    className="cursor-pointer hover:shadow-lg transition"
+                  >
+                    <div className="flex items-start justify-between mb-3">
+                      <div>
+                        <h3 className="font-semibold text-lg">{todayEvent.title}</h3>
+                        <p className="text-sm text-neutral-600">
+                          {todayEvent.location || 'Location not set'}
+                          {todayEvent.court_number ? ` - Court ${todayEvent.court_number}` : ''}
+                        </p>
+                      </div>
+                      <Badge status={todayEventCanCheckIn ? (todayEventCheckedIn ? 'success' : 'warning') : 'default'}>
+                        {todayEventCanCheckIn
+                          ? (todayEventCheckedIn ? 'Checked In' : 'Check In')
+                          : String(todayEvent.status || '').toUpperCase() === 'COMPLETED'
+                          ? 'Completed'
+                          : 'Joining Closed'}
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-neutral-600">{formatBangkokDateTime(todayEvent.date)}</p>
+                    <p className="text-xs text-neutral-500 mt-2">
+                      {todayEventCanCheckIn
+                        ? (todayEventCheckedIn ? 'Tap to view event details.' : 'Tap to confirm check-in and open this event.')
+                        : 'Tap to view event details.'}
+                    </p>
+                  </Card>
+                )
+              })}
+            </div>
           ) : (
             <Card
               onClick={() => navigate('/events', { state: { openCreateEvent: !hasUpcoming } })}

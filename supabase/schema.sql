@@ -97,6 +97,7 @@ CREATE TABLE expenses (
   status TEXT DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED')),
   approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
   approved_at TIMESTAMP,
+  added_by UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMP DEFAULT now()
 );
 
@@ -575,11 +576,29 @@ on public.expenses
 for insert
 to authenticated
 with check (
-  user_id = auth.uid()
+  added_by = auth.uid()
   and exists (
     select 1 from public.team_members tm
     where tm.team_id = expenses.team_id
     and tm.user_id = auth.uid()
+  )
+  and (
+    user_id = auth.uid()
+    or (
+      exists (
+        select 1
+        from public.teams t
+        where t.id = expenses.team_id
+          and t.treasurer_id = auth.uid()
+      )
+      and exists (
+        select 1
+        from public.event_participants ep
+        where ep.event_id = expenses.event_id
+          and ep.user_id = expenses.user_id
+          and ep.checked_in = true
+      )
+    )
   )
   and exists (
     select 1
@@ -985,6 +1004,13 @@ add column if not exists approved_by uuid references public.users(id) on delete 
 alter table public.expenses
 add column if not exists approved_at timestamp;
 
+alter table public.expenses
+add column if not exists added_by uuid references public.users(id) on delete set null;
+
+update public.expenses
+set added_by = user_id
+where added_by is null;
+
 create or replace function public.set_expense_approval_meta()
 returns trigger
 language plpgsql
@@ -1273,6 +1299,14 @@ begin
     v_message := format('%s created a new event "%s" for team "%s".', coalesce(v_actor_name, 'A teammate'), coalesce(new.title, 'New Event'), coalesce(v_team_name, 'Unknown Team'));
     v_link := '/event/' || new.id::text;
     v_event_id := new.id;
+  elsif tg_op = 'UPDATE' and old.status is distinct from new.status and upper(coalesce(new.status, '')) = 'FINALIZED' then
+    v_team_id := new.team_id;
+    select t.name into v_team_name from public.teams t where t.id = v_team_id;
+    v_type := 'EVENT_JOINING_LOCKED';
+    v_title := 'Joining Locked';
+    v_message := format('%s locked joining for event "%s" in "%s". Expense adding is now open.', coalesce(v_actor_name, 'A teammate'), coalesce(new.title, 'an event'), coalesce(v_team_name, 'Unknown Team'));
+    v_link := '/event/' || new.id::text;
+    v_event_id := new.id;
   elsif tg_op = 'UPDATE' and old.status is distinct from new.status and upper(coalesce(new.status, '')) = 'CANCELLED' then
     v_team_id := new.team_id;
     select t.name into v_team_name from public.teams t where t.id = v_team_id;
@@ -1353,6 +1387,7 @@ declare
   v_checked_in_count integer;
   v_total_expense numeric := 0;
   v_share numeric := 0;
+  v_recipient record;
   v_participant record;
   v_user_expense_total numeric := 0;
   v_balance numeric := 0;
@@ -1378,6 +1413,23 @@ begin
   select t.name into v_team_name
   from public.teams t
   where t.id = new.team_id;
+
+  for v_recipient in
+    select tm.user_id
+    from public.team_members tm
+    where tm.team_id = new.team_id
+      and (v_actor_id is null or tm.user_id <> v_actor_id)
+  loop
+    perform public.create_notification(
+      v_recipient.user_id,
+      v_actor_id,
+      'EVENT_EXPENSE_ADDING_LOCKED',
+      'Expense Adding Locked',
+      format('%s locked expense adding for event "%s" in "%s". You can no longer add expenses and settlement is now being calculated.', coalesce(v_actor_name, 'A teammate'), coalesce(new.title, 'an event'), coalesce(v_team_name, 'Unknown Team')),
+      '/event/' || new.id::text,
+      jsonb_build_object('event_id', new.id, 'team_id', new.team_id)
+    );
+  end loop;
 
   select count(*)::int into v_checked_in_count
   from public.event_participants ep
