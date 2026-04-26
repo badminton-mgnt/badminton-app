@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { APP_SECRET_INTERNAL_EMAIL_DOMAIN } from './accountIdentity'
 
 const attachUsersById = async (rows, fields = 'id, name') => {
   if (!rows?.length) {
@@ -125,12 +126,15 @@ const getAuthRedirectUrl = (path = '/') => {
   return new URL(normalizedPath, getAppBaseUrl()).toString()
 }
 
-export const signup = async (email, password, name) => {
+export const signupWithEmail = async (email, password, name) => {
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
-      data: { name },
+      data: {
+        name,
+        signup_method: 'email',
+      },
       emailRedirectTo: getAuthRedirectUrl('/login'),
     },
   })
@@ -140,9 +144,38 @@ export const signup = async (email, password, name) => {
   return data
 }
 
+export const signupWithAppSecret = async (username, password, name, appSecret) => {
+  const normalizedUsername = String(username || '').trim().toLowerCase()
+  const internalEmail = `${normalizedUsername}@${APP_SECRET_INTERNAL_EMAIL_DOMAIN}`
+
+  const { data, error } = await supabase.auth.signUp({
+    email: internalEmail,
+    password,
+    options: {
+      data: {
+        name,
+        username: normalizedUsername,
+        app_secret: String(appSecret || '').trim(),
+        signup_method: 'app_secret',
+      },
+    },
+  })
+
+  if (error) throw error
+
+  return data
+}
+
+export const signup = signupWithEmail
+
 export const login = async (email, password) => {
+  const rawIdentifier = String(email || '').trim().toLowerCase()
+  const loginEmail = rawIdentifier.includes('@')
+    ? rawIdentifier
+    : `${rawIdentifier}@${APP_SECRET_INTERNAL_EMAIL_DOMAIN}`
+
   const { data, error } = await supabase.auth.signInWithPassword({
-    email,
+    email: loginEmail,
     password,
   })
 
@@ -288,6 +321,92 @@ export const getAppUsers = async () => {
     .from('users')
     .select('id, name, role')
     .order('name', { ascending: true })
+
+  if (error) throw error
+  return data
+}
+
+export const isUsernameTaken = async (username) => {
+  const normalizedUsername = String(username || '').trim().toLowerCase()
+  if (!normalizedUsername) return false
+
+  const { count, error } = await supabase
+    .from('users')
+    .select('id', { count: 'exact', head: true })
+    .eq('username', normalizedUsername)
+
+  if (error) throw error
+  return Number(count || 0) > 0
+}
+
+const generateAppSecretKeyValue = () => {
+  const bytes = new Uint8Array(12)
+  window.crypto.getRandomValues(bytes)
+  const randomPart = Array.from(bytes)
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+    .toUpperCase()
+  return `APP-${randomPart}`
+}
+
+export const getAppSignupSecrets = async () => {
+  const { data, error } = await supabase
+    .from('app_signup_secrets')
+    .select('id, secret_key, is_active, max_uses, used_count, expires_at, revoked_at, revoked_by, created_by, created_at, users:created_by(id, name)')
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return data || []
+}
+
+export const createAppSignupSecret = async ({ maxUses = 10, expiresInHours = 1 } = {}) => {
+  const maxUsesValue = Number(maxUses)
+  const expiresHoursValue = Number(expiresInHours)
+
+  if (!Number.isFinite(maxUsesValue) || maxUsesValue <= 0) {
+    throw new Error('maxUses must be a positive number')
+  }
+
+  if (!Number.isFinite(expiresHoursValue) || expiresHoursValue <= 0) {
+    throw new Error('expiresInHours must be a positive number')
+  }
+
+  const key = generateAppSecretKeyValue()
+  const expiresAt = new Date(Date.now() + (expiresHoursValue * 60 * 60 * 1000)).toISOString()
+
+  const { data, error } = await supabase
+    .from('app_signup_secrets')
+    .insert([
+      {
+        secret_key: key,
+        max_uses: Math.floor(maxUsesValue),
+        expires_at: expiresAt,
+      },
+    ])
+    .select('id, secret_key, is_active, max_uses, used_count, expires_at, revoked_at, revoked_by, created_by, created_at, users:created_by(id, name)')
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export const deactivateAppSignupSecret = async (secretId) => {
+  return revokeAppSignupSecret(secretId)
+}
+
+export const revokeAppSignupSecret = async (secretId) => {
+  const { data: authData } = await supabase.auth.getUser()
+
+  const { data, error } = await supabase
+    .from('app_signup_secrets')
+    .update({
+      is_active: false,
+      revoked_at: new Date().toISOString(),
+      revoked_by: authData.user?.id || null,
+    })
+    .eq('id', secretId)
+    .select('id, is_active, revoked_at, revoked_by')
+    .single()
 
   if (error) throw error
   return data

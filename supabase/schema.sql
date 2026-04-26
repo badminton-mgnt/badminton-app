@@ -2,8 +2,25 @@
 CREATE TABLE users (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
+  username TEXT UNIQUE,
   role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'sub_admin', 'admin')),
   created_at TIMESTAMP DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS app_signup_secrets (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  secret_key TEXT NOT NULL UNIQUE,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  max_uses INTEGER NOT NULL DEFAULT 10,
+  used_count INTEGER NOT NULL DEFAULT 0,
+  expires_at TIMESTAMP NOT NULL DEFAULT (now() + interval '1 hour'),
+  revoked_at TIMESTAMP,
+  revoked_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMP DEFAULT now(),
+  constraint app_signup_secrets_max_uses_positive check (max_uses > 0),
+  constraint app_signup_secrets_used_count_non_negative check (used_count >= 0),
+  constraint app_signup_secrets_used_count_limit check (used_count <= max_uses)
 );
 
 -- Create Teams Table
@@ -165,6 +182,7 @@ END $$;
 -- =====================================================
 
 alter table public.users enable row level security;
+alter table public.app_signup_secrets enable row level security;
 alter table public.teams enable row level security;
 alter table public.team_deletion_logs enable row level security;
 alter table public.team_members enable row level security;
@@ -285,6 +303,43 @@ on public.users
 for insert
 to authenticated
 with check (auth.uid() = id);
+
+drop policy if exists "admin manage app signup secrets" on public.app_signup_secrets;
+drop policy if exists "admin view app signup secrets" on public.app_signup_secrets;
+
+create policy "admin view app signup secrets"
+on public.app_signup_secrets
+for select
+to authenticated
+using (
+  exists (
+    select 1
+    from public.users u
+    where u.id = auth.uid()
+      and lower(coalesce(u.role, '')) = 'admin'
+  )
+);
+
+create policy "admin manage app signup secrets"
+on public.app_signup_secrets
+for all
+to authenticated
+using (
+  exists (
+    select 1
+    from public.users u
+    where u.id = auth.uid()
+      and lower(coalesce(u.role, '')) = 'admin'
+  )
+)
+with check (
+  exists (
+    select 1
+    from public.users u
+    where u.id = auth.uid()
+      and lower(coalesce(u.role, '')) = 'admin'
+  )
+);
 
 
 -- =====================================================
@@ -974,6 +1029,60 @@ alter table public.users
 add column if not exists role text not null default 'user'
 check (role in ('user', 'sub_admin', 'admin'));
 
+alter table public.users
+add column if not exists username text;
+
+create unique index if not exists users_username_unique_idx
+on public.users (lower(username))
+where username is not null;
+
+alter table public.app_signup_secrets
+add column if not exists max_uses integer not null default 10;
+
+alter table public.app_signup_secrets
+add column if not exists used_count integer not null default 0;
+
+alter table public.app_signup_secrets
+add column if not exists expires_at timestamp not null default (now() + interval '1 hour');
+
+alter table public.app_signup_secrets
+add column if not exists revoked_at timestamp;
+
+alter table public.app_signup_secrets
+add column if not exists revoked_by uuid references public.users(id) on delete set null;
+
+alter table public.app_signup_secrets
+alter column created_by set default auth.uid();
+
+update public.app_signup_secrets
+set max_uses = 10
+where max_uses is null or max_uses <= 0;
+
+update public.app_signup_secrets
+set used_count = 0
+where used_count is null or used_count < 0;
+
+alter table public.app_signup_secrets
+drop constraint if exists app_signup_secrets_max_uses_positive;
+
+alter table public.app_signup_secrets
+add constraint app_signup_secrets_max_uses_positive
+check (max_uses > 0);
+
+alter table public.app_signup_secrets
+drop constraint if exists app_signup_secrets_used_count_non_negative;
+
+alter table public.app_signup_secrets
+add constraint app_signup_secrets_used_count_non_negative
+check (used_count >= 0);
+
+alter table public.app_signup_secrets
+drop constraint if exists app_signup_secrets_used_count_limit;
+
+alter table public.app_signup_secrets
+add constraint app_signup_secrets_used_count_limit
+check (used_count <= max_uses);
+
 alter table public.team_members
 drop column if exists role;
 
@@ -1575,13 +1684,42 @@ begin
   select u.name into v_actor_name from public.users u where u.id = v_actor_id;
 
   if tg_op = 'INSERT' then
-    if upper(coalesce(new.status, 'PENDING')) <> 'PENDING' then
-      return new;
-    end if;
-
     select e.title into v_event_title
     from public.events e
     where e.id = new.event_id;
+
+    if new.added_by is not null
+      and new.user_id is not null
+      and new.added_by <> new.user_id then
+      perform public.create_notification(
+        new.user_id,
+        coalesce(v_actor_id, new.added_by),
+        'EXPENSE_ADDED_FOR_YOU',
+        'Expense added for you',
+        format(
+          '%s added an expense for you in event "%s"%s.',
+          coalesce(v_actor_name, 'A teammate'),
+          coalesce(v_event_title, 'an event'),
+          case
+            when upper(coalesce(new.status, 'PENDING')) = 'APPROVED' then ' and it was approved'
+            when upper(coalesce(new.status, 'PENDING')) = 'REJECTED' then ' and it was rejected'
+            else ''
+          end
+        ),
+        '/event/' || new.event_id::text,
+        jsonb_build_object(
+          'expense_id', new.id,
+          'event_id', new.event_id,
+          'team_id', new.team_id,
+          'status', new.status,
+          'added_by', new.added_by
+        )
+      );
+    end if;
+
+    if upper(coalesce(new.status, 'PENDING')) <> 'PENDING' then
+      return new;
+    end if;
 
     perform public.create_notification(
       new.user_id,

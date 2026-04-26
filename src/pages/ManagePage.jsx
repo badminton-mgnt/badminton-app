@@ -2,12 +2,16 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Header, Card, Button, BottomNav, Input, Modal } from '../components'
 import {
+  createAppSignupSecret,
+  revokeAppSignupSecret,
   deleteUserProfile,
   getAllTeams,
+  getAppSignupSecrets,
   getAppUsers,
   getUserProfile,
   updateUserRole,
 } from '../lib/api'
+import { formatVietnamDate, formatVietnamDateTime, toUnixTimestamp } from '../lib/dateTime'
 import { motion } from 'framer-motion'
 import { Settings2 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
@@ -18,9 +22,12 @@ export const ManagePage = () => {
   const [profile, setProfile] = useState(null)
   const [teams, setTeams] = useState([])
   const [appUsers, setAppUsers] = useState([])
+  const [appSecrets, setAppSecrets] = useState([])
   const [activeTab, setActiveTab] = useState('teams')
   const [actionTargetId, setActionTargetId] = useState(null)
   const [userSearch, setUserSearch] = useState('')
+  const [secretFeedback, setSecretFeedback] = useState('')
+  const [secretError, setSecretError] = useState('')
   const [userModalOpen, setUserModalOpen] = useState(false)
   const [selectedUser, setSelectedUser] = useState(null)
   const [nextRole, setNextRole] = useState('user')
@@ -34,18 +41,44 @@ export const ManagePage = () => {
 
   const loadData = async () => {
     try {
-      const [profileData, teamsData, usersData] = await Promise.all([
-        getUserProfile(user.id),
-        getAllTeams(),
-        getAppUsers(),
-      ])
+      const profileData = await getUserProfile(user.id)
+      setProfile(profileData)
 
       const isAdminRole = (profileData.role || '').toLowerCase() === 'admin'
-      const nextTeams = isAdminRole ? teamsData : []
 
-      setProfile(profileData)
+      let nextTeams = []
+      let nextUsers = []
+      let nextSecrets = []
+
+      if (isAdminRole) {
+        const [teamsData, usersData, secretsData] = await Promise.allSettled([
+          getAllTeams(),
+          getAppUsers(),
+          getAppSignupSecrets(),
+        ])
+
+        if (teamsData.status === 'fulfilled') {
+          nextTeams = teamsData.value
+        } else {
+          console.error('Error loading teams:', teamsData.reason)
+        }
+
+        if (usersData.status === 'fulfilled') {
+          nextUsers = usersData.value
+        } else {
+          console.error('Error loading users:', usersData.reason)
+        }
+
+        if (secretsData.status === 'fulfilled') {
+          nextSecrets = secretsData.value
+        } else {
+          console.error('Error loading app secrets:', secretsData.reason)
+        }
+      }
+
       setTeams(nextTeams)
-      setAppUsers(isAdminRole ? usersData : [])
+      setAppUsers(nextUsers)
+      setAppSecrets(nextSecrets)
     } catch (error) {
       console.error('Error loading manage data:', error)
     } finally {
@@ -100,6 +133,57 @@ export const ManagePage = () => {
     }
   }
 
+  const handleGenerateSecret = async () => {
+    try {
+      setActionTargetId('secret-generate')
+      setSecretFeedback('')
+      setSecretError('')
+      const createdSecret = await createAppSignupSecret({ maxUses: 10, expiresInHours: 1 })
+      setAppSecrets((prev) => [createdSecret, ...prev])
+      setSecretFeedback(`Created key: ${createdSecret.secret_key}`)
+    } catch (error) {
+      console.error('Error generating app secret:', error)
+      setSecretError(error?.message || 'Unable to generate app secret key.')
+    } finally {
+      setActionTargetId(null)
+    }
+  }
+
+  const handleRevokeSecret = async (secretId) => {
+    try {
+      setActionTargetId(`secret-revoke-${secretId}`)
+      setSecretFeedback('')
+      setSecretError('')
+      const revokedSecret = await revokeAppSignupSecret(secretId)
+      setAppSecrets((prev) => prev.map((secret) => (
+        secret.id === secretId
+          ? {
+            ...secret,
+            is_active: false,
+            revoked_at: revokedSecret?.revoked_at || new Date().toISOString(),
+            revoked_by: revokedSecret?.revoked_by || secret.revoked_by,
+          }
+          : secret
+      )))
+    } catch (error) {
+      console.error('Error revoking app secret:', error)
+      setSecretError(error?.message || 'Unable to revoke this key.')
+    } finally {
+      setActionTargetId(null)
+    }
+  }
+
+  const handleCopySecret = async (secretKey) => {
+    try {
+      await navigator.clipboard.writeText(secretKey)
+      setSecretFeedback(`Copied key: ${secretKey}`)
+      setSecretError('')
+    } catch (error) {
+      console.error('Error copying app secret:', error)
+      setSecretError('Unable to copy key to clipboard.')
+    }
+  }
+
   const isAdmin = (profile?.role || '').toLowerCase() === 'admin'
   const normalizedUserSearch = userSearch.trim().toLowerCase()
   const filteredAppUsers = useMemo(
@@ -150,7 +234,7 @@ export const ManagePage = () => {
                   </div>
                   <div>
                     <p className="text-sm text-neutral-600">Management Area</p>
-                    <p className="font-semibold">Teams and users admin tools</p>
+                    <p className="font-semibold">Teams, users and app-secret admin tools</p>
                   </div>
                 </div>
               </Card>
@@ -159,7 +243,7 @@ export const ManagePage = () => {
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500 px-2">
                   Sections
                 </p>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   <button
                     type="button"
                     className={`rounded-lg border px-3 py-2.5 text-xs font-semibold transition ${
@@ -181,6 +265,17 @@ export const ManagePage = () => {
                     onClick={() => setActiveTab('users')}
                   >
                     Users
+                  </button>
+                  <button
+                    type="button"
+                    className={`rounded-lg border px-3 py-2.5 text-xs font-semibold transition ${
+                      activeTab === 'app-secrets'
+                        ? 'border-primary-400 bg-primary-400 text-white shadow-sm'
+                        : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50'
+                    }`}
+                    onClick={() => setActiveTab('app-secrets')}
+                  >
+                    App Secrets
                   </button>
                 </div>
               </Card>
@@ -206,7 +301,7 @@ export const ManagePage = () => {
                             <div>
                               <p className="font-semibold">{team.name}</p>
                               <p className="text-xs text-neutral-600">
-                                Created {new Date(team.created_at).toLocaleDateString()}
+                                Created {formatVietnamDate(team.created_at, '-')}
                               </p>
                             </div>
                             <Button
@@ -224,7 +319,7 @@ export const ManagePage = () => {
                     )}
                   </div>
                 </>
-              ) : (
+              ) : activeTab === 'users' ? (
                 <div className="space-y-4">
                   <Card className="space-y-3">
                     <h3 className="text-sm font-semibold text-neutral-700 uppercase">
@@ -253,6 +348,94 @@ export const ManagePage = () => {
                           </button>
                         )
                       })}
+                    </div>
+                  </Card>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <Card className="space-y-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-semibold text-neutral-700 uppercase">App Secret Keys</h3>
+                        <p className="text-xs text-neutral-500">Generated by admin. Each key: max 10 users, expires in 1 hour.</p>
+                      </div>
+                      <Button
+                        onClick={handleGenerateSecret}
+                        loading={actionTargetId === 'secret-generate'}
+                        disabled={actionTargetId === 'secret-generate'}
+                      >
+                        Generate Key
+                      </Button>
+                    </div>
+
+                    {secretFeedback ? (
+                      <div className="bg-success-50 text-success-800 p-3 rounded-xl text-sm">{secretFeedback}</div>
+                    ) : null}
+
+                    {secretError ? (
+                      <div className="bg-error-50 text-error-800 p-3 rounded-xl text-sm">{secretError}</div>
+                    ) : null}
+
+                    <div className="space-y-3">
+                      {appSecrets.length === 0 ? (
+                        <p className="text-sm text-neutral-600">No app secret keys yet.</p>
+                      ) : (
+                        appSecrets.map((secret) => {
+                          const expiresAtMs = toUnixTimestamp(secret.expires_at)
+                          const isExpired = expiresAtMs === null ? false : expiresAtMs <= Date.now()
+                          const usageLabel = `${secret.used_count}/${secret.max_uses}`
+                          const statusLabel = !secret.is_active
+                            ? 'Revoked'
+                            : isExpired
+                              ? 'Expired'
+                              : secret.used_count >= secret.max_uses
+                                ? 'Used up'
+                                : 'Active'
+
+                          return (
+                            <Card key={secret.id} className="border border-neutral-200">
+                              <div className="space-y-2">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div>
+                                    <p className="font-semibold text-sm break-all">{secret.secret_key}</p>
+                                    <p className="text-xs text-neutral-500">
+                                      Created by {secret.users?.name || 'Admin'} • {formatVietnamDateTime(secret.created_at, '-')}
+                                    </p>
+                                  </div>
+                                  <span className="text-xs font-semibold px-2 py-1 rounded-full bg-neutral-100 text-neutral-700">
+                                    {statusLabel}
+                                  </span>
+                                </div>
+
+                                <div className="text-xs text-neutral-600 flex flex-wrap gap-x-4 gap-y-1">
+                                  <span>Usage: {usageLabel}</span>
+                                  <span>Expires: {formatVietnamDateTime(secret.expires_at, '-')}</span>
+                                  {secret.revoked_at ? <span>Revoked: {formatVietnamDateTime(secret.revoked_at, '-')}</span> : null}
+                                </div>
+
+                                <div className="flex gap-2">
+                                  <Button
+                                    variant="secondary"
+                                    className="flex-1"
+                                    onClick={() => handleCopySecret(secret.secret_key)}
+                                  >
+                                    Copy
+                                  </Button>
+                                  <Button
+                                    variant="danger"
+                                    className="flex-1"
+                                    onClick={() => handleRevokeSecret(secret.id)}
+                                    loading={actionTargetId === `secret-revoke-${secret.id}`}
+                                    disabled={!secret.is_active || actionTargetId === `secret-revoke-${secret.id}`}
+                                  >
+                                    Revoke
+                                  </Button>
+                                </div>
+                              </div>
+                            </Card>
+                          )
+                        })
+                      )}
                     </div>
                   </Card>
                 </div>

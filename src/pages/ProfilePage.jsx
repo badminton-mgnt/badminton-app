@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Header, Card, Button, BottomNav, Modal, Input } from '../components'
 import { getUserProfile, logout, getTeams, getPaymentInfo, setPaymentInfo } from '../lib/api'
+import { getVisibleUserEmail } from '../lib/accountIdentity'
+import { formatVietnamDate } from '../lib/dateTime'
 import { motion } from 'framer-motion'
 import { LogOut, Edit2 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
@@ -25,6 +27,7 @@ export const ProfilePage = () => {
     account_name: '',
     qr_url: '',
   })
+  const visibleEmail = getVisibleUserEmail(user?.email)
 
   useEffect(() => {
     if (user) {
@@ -148,10 +151,12 @@ export const ProfilePage = () => {
                 {profile?.role?.replace('_', ' ') || 'User'}
               </p>
             </div>
-            <div>
-              <p className="text-sm text-neutral-600">Email</p>
-              <p className="text-lg font-semibold">{user?.email}</p>
-            </div>
+            {visibleEmail ? (
+              <div>
+                <p className="text-sm text-neutral-600">Email</p>
+                <p className="text-lg font-semibold">{visibleEmail}</p>
+              </div>
+            ) : null}
           </Card>
         </motion.div>
 
@@ -231,7 +236,7 @@ export const ProfilePage = () => {
                   <div>
                     <p className="font-semibold">{team.teams.name}</p>
                     <p className="text-xs text-neutral-600">
-                      Joined {new Date(team.joined_at).toLocaleDateString()}
+                      Joined {formatVietnamDate(team.joined_at, '-')}
                     </p>
                   </div>
                 </div>
