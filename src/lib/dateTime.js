@@ -1,7 +1,14 @@
-const bangkokDateTimeFormatter = new Intl.DateTimeFormat('en-GB', {
-  timeZone: 'Asia/Bangkok',
+const APP_TIMEZONE = 'Asia/Ho_Chi_Minh'
+
+const vietnamDateTimeFormatter = new Intl.DateTimeFormat('vi-VN', {
+  timeZone: APP_TIMEZONE,
   dateStyle: 'medium',
   timeStyle: 'short',
+})
+
+const vietnamDateFormatter = new Intl.DateTimeFormat('vi-VN', {
+  timeZone: APP_TIMEZONE,
+  dateStyle: 'medium',
 })
 
 const parseDateValue = (value) => {
@@ -21,12 +28,12 @@ const parseDateValue = (value) => {
   return new Date(value)
 }
 
-export const getBangkokDateKey = (value) => {
+export const getVietnamDateKey = (value) => {
   const date = parseDateValue(value)
   if (Number.isNaN(date.getTime())) return ''
 
   const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Asia/Bangkok',
+    timeZone: APP_TIMEZONE,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -36,10 +43,16 @@ export const getBangkokDateKey = (value) => {
   return `${getPart('year')}-${getPart('month')}-${getPart('day')}`
 }
 
-export const formatBangkokDateTime = (value) => {
+export const formatVietnamDateTime = (value, fallback = 'Date unavailable') => {
   const date = parseDateValue(value)
-  if (Number.isNaN(date.getTime())) return 'Date unavailable'
-  return bangkokDateTimeFormatter.format(date)
+  if (Number.isNaN(date.getTime())) return fallback
+  return vietnamDateTimeFormatter.format(date)
+}
+
+export const formatVietnamDate = (value, fallback = 'Date unavailable') => {
+  const date = parseDateValue(value)
+  if (Number.isNaN(date.getTime())) return fallback
+  return vietnamDateFormatter.format(date)
 }
 
 export const toDateTimeLocalValue = (value) => {
@@ -47,7 +60,7 @@ export const toDateTimeLocalValue = (value) => {
   if (Number.isNaN(date.getTime())) return ''
 
   const parts = new Intl.DateTimeFormat('sv-SE', {
-    timeZone: 'Asia/Bangkok',
+    timeZone: APP_TIMEZONE,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -67,3 +80,12 @@ export const toSupabaseDateTime = (value) => {
   if (Number.isNaN(date.getTime())) return value
   return date.toISOString()
 }
+
+export const toUnixTimestamp = (value) => {
+  const date = parseDateValue(value)
+  if (Number.isNaN(date.getTime())) return null
+  return date.getTime()
+}
+
+export const getBangkokDateKey = getVietnamDateKey
+export const formatBangkokDateTime = formatVietnamDateTime

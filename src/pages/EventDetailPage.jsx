@@ -106,6 +106,23 @@ export const EventDetailPage = () => {
       const expensesData = expensesResult.status === 'fulfilled' ? expensesResult.value : null
       let transfersData = transfersResult.status === 'fulfilled' ? transfersResult.value : null
       const profileData = profileResult.status === 'fulfilled' ? profileResult.value : null
+      const normalizedRole = (profileData?.role || 'user').toLowerCase()
+      const isAccessBypassRole = ['admin', 'sub_admin'].includes(normalizedRole)
+      const isCurrentUserParticipant = Array.isArray(participantsData)
+        ? participantsData.some((participant) => String(participant.user_id) === String(user.id))
+        : false
+
+      if (!isAccessBypassRole && !isCurrentUserParticipant) {
+        setLoadError('You can only view event details after joining this event.')
+        setEvent(null)
+        setParticipants([])
+        setExpenses([])
+        setPaymentTransfers([])
+        setTeamMembers([])
+        setTeamMemberCount(0)
+        setTeamTreasurerId(null)
+        return
+      }
 
       setEvent(eventData)
       let treasuryUserId = null
@@ -156,7 +173,7 @@ export const EventDetailPage = () => {
         setPaymentTransfers(transfersData)
       }
       if (profileData) {
-        setCurrentUserRole((profileData.role || 'user').toLowerCase())
+        setCurrentUserRole(normalizedRole)
         setCurrentUserName(profileData.name || '')
       }
 
@@ -1788,11 +1805,13 @@ export const EventDetailPage = () => {
                 }))}
               >
                 <option value="">Myself (default)</option>
-                {checkedInParticipantOptions.map((participant) => (
+                {checkedInParticipantOptions
+                  .filter((participant) => String(participant.user_id) !== String(user.id))
+                  .map((participant) => (
                   <option key={participant.user_id} value={participant.user_id}>
                     {participant.name}
                   </option>
-                ))}
+                  ))}
               </select>
               <p className="mt-1 text-xs text-neutral-500">Leave empty to record your own expense.</p>
             </div>

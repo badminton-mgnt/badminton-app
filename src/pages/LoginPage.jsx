@@ -7,7 +7,7 @@ import { motion } from 'framer-motion'
 export const LoginPage = () => {
   const navigate = useNavigate()
   const [formData, setFormData] = useState({
-    email: '',
+    identifier: '',
     password: '',
   })
   const [loading, setLoading] = useState(false)
@@ -24,7 +24,7 @@ export const LoginPage = () => {
     setLoading(true)
 
     try {
-      await login(formData.email, formData.password)
+      await login(formData.identifier, formData.password)
       navigate('/')
     } catch (err) {
       if (err.message.includes('Email not confirmed')) {
@@ -53,12 +53,11 @@ export const LoginPage = () => {
         <Card className="mb-6">
           <form onSubmit={handleSubmit} className="space-y-4">
             <Input
-              label="Email"
-              type="email"
-              name="email"
-              value={formData.email}
+              label="Email or Username"
+              name="identifier"
+              value={formData.identifier}
               onChange={handleChange}
-              placeholder="you@example.com"
+              placeholder="you@example.com or your.username"
             />
 
             <Input
@@ -78,7 +77,7 @@ export const LoginPage = () => {
 
             <Button
               type="submit"
-              disabled={!formData.email || !formData.password || loading}
+              disabled={!formData.identifier || !formData.password || loading}
               loading={loading}
               className="w-full"
             >
