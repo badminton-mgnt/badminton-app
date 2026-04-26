@@ -56,7 +56,7 @@ export const EventDetailPage = () => {
   const [expenseActionId, setExpenseActionId] = useState(null)
   const [paymentActionId, setPaymentActionId] = useState(null)
   const [loadError, setLoadError] = useState('')
-  const [expenseForm, setExpenseForm] = useState({ amount: '', description: '' })
+  const [expenseForm, setExpenseForm] = useState({ amount: '', description: '', expenseForUserId: '' })
   const [receiverPaymentInfo, setReceiverPaymentInfo] = useState(null)
   const [receiverName, setReceiverName] = useState('Treasurer')
   const [teamTreasurerId, setTeamTreasurerId] = useState(null)
@@ -304,6 +304,23 @@ export const EventDetailPage = () => {
   const checkedInBySelf = Boolean(currentParticipant?.checked_in_by) && String(currentParticipant.checked_in_by) === String(user.id)
   const checkedInParticipantIdSet = new Set(participants.map((participant) => String(participant.user_id)))
   const addableTeamMembers = teamMembers.filter((member) => !checkedInParticipantIdSet.has(String(member.user_id)))
+  const checkedInParticipantOptions = participants
+    .filter((participant) => isParticipantCheckedIn(participant))
+    .map((participant) => ({
+      user_id: participant.user_id,
+      name: participant.users?.name || 'Member',
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+  const canOpenExpenseModal = (isCheckedIn || isTeamTreasurer) && isJoiningClosed && !isExpenseAddingClosed
+  const isSelectedExpenseOwnerValid =
+    !isTeamTreasurer ||
+    !expenseForm.expenseForUserId ||
+    checkedInParticipantOptions.some((participant) => String(participant.user_id) === String(expenseForm.expenseForUserId))
+
+  const handleOpenExpenseModal = () => {
+    setExpenseForm({ amount: '', description: '', expenseForUserId: '' })
+    setExpenseModalOpen(true)
+  }
 
   const handleCheckIn = async () => {
     if (!isWithinCheckInWindow || isJoiningClosed) {
@@ -402,8 +419,21 @@ export const EventDetailPage = () => {
   }
 
   const handleCreateExpense = async () => {
-    if (!isJoiningClosed || isExpenseAddingClosed) {
+    if (!isJoiningClosed || isExpenseAddingClosed || (!isCheckedIn && !isTeamTreasurer)) {
       setExpenseModalOpen(false)
+      return
+    }
+
+    const expenseOwnerUserId =
+      isTeamTreasurer && expenseForm.expenseForUserId
+        ? expenseForm.expenseForUserId
+        : user.id
+
+    if (
+      isTeamTreasurer &&
+      expenseForm.expenseForUserId &&
+      !checkedInParticipantOptions.some((participant) => String(participant.user_id) === String(expenseOwnerUserId))
+    ) {
       return
     }
 
@@ -411,13 +441,14 @@ export const EventDetailPage = () => {
       setActionLoading(true)
       await createExpense({
         event_id: eventId,
-        user_id: user.id,
+        user_id: expenseOwnerUserId,
         amount: parseFloat(expenseForm.amount),
         description: expenseForm.description,
         team_id: event.team_id,
         status: canAutoApproveExpense ? 'APPROVED' : 'PENDING',
+        added_by: user.id,
       })
-      setExpenseForm({ amount: '', description: '' })
+      setExpenseForm({ amount: '', description: '', expenseForUserId: '' })
       setExpenseModalOpen(false)
       await loadData()
     } catch (error) {
@@ -694,6 +725,19 @@ export const EventDetailPage = () => {
       .filter((member) => member.payoutNeeded > 0)
     : []
 
+  const membersNeedingTreasuryCollection = canRunSettlement
+    ? participantSettlements
+      .map(({ participant, settlement }) => ({
+        user_id: participant.user_id,
+        name: participant.users?.name || 'Member',
+        amountToTreasury: Math.max(-settlement.normalizedBalance, 0),
+        waitingAmount: settlement.waitingToTreasuryAmount,
+        waitingTransfer: settlement.latestWaitingToTreasuryTransfer,
+      }))
+      .filter((member) => String(member.user_id) !== String(treasuryUserId) && member.amountToTreasury > 0)
+    : []
+  const settlementTransferActionCount = membersNeedingTreasuryCollection.length + membersNeedingPayout.length
+
   const payoutTransferAmount = paymentTarget
     ? Math.max(paymentTarget.payoutNeeded - (Number(paymentTarget?.waitingTransfer?.amount || 0)), 0)
     : 0
@@ -727,6 +771,7 @@ export const EventDetailPage = () => {
 
   const treasurySentAmount = confirmedFromTreasuryAmount
   const treasuryExpenseTotal = totalExpense
+  const treasuryReceivedAmount = confirmedToTreasuryAmount
   const treasuryNetFund = confirmedToTreasuryAmount - treasurySentAmount
   const normalizedTreasuryNetFund = Math.abs(treasuryNetFund) < 1.0 ? 0 : treasuryNetFund
   const confirmedTreasuryReceivedTransfers = paymentTransfers.filter(
@@ -1279,36 +1324,78 @@ export const EventDetailPage = () => {
                 </div>
               </Card>
 
-              {waitingConfirmationPayments.length > 0 && (
-                <Card className="mt-3 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs text-neutral-600 uppercase">Pending Payment Confirmations</p>
-                    <Badge status="warning">{waitingConfirmationPayments.length}</Badge>
-                  </div>
-                  <div className="space-y-2">
-                    {waitingConfirmationPayments.map((payment) => (
-                      <div key={payment.id} className="flex items-center justify-between gap-2 border-b last:border-b-0 py-2">
-                        <div>
-                          <p className="text-sm font-semibold">{payment.from_user?.name || 'Unknown user'}</p>
-                          <p className="text-xs text-neutral-600">{`Transferred: đ ${formatVndAmount(payment.amount)}`}</p>
+              <Card className="mt-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-neutral-600 uppercase">Settlement Transfers</p>
+                  <Badge status="default">{settlementTransferActionCount}</Badge>
+                </div>
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase text-neutral-600">Need To Pay Treasury</p>
+                  {membersNeedingTreasuryCollection.length === 0 ? (
+                    <p className="text-xs text-neutral-500">No members need to pay into treasury.</p>
+                  ) : (
+                    membersNeedingTreasuryCollection.map((member) => {
+                      const hasWaitingTransfer = Boolean(member.waitingTransfer)
+
+                      return (
+                        <div key={`collect-${member.user_id}`} className="w-full rounded-xl border border-neutral-200 p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <div>
+                              <p className="text-sm font-semibold">{member.name}</p>
+                              <p className="text-xs text-neutral-600">{`Expected payment: đ ${formatVndAmount(member.amountToTreasury)}`}</p>
+                              {hasWaitingTransfer && (
+                                <p className="text-xs text-neutral-500">{`Submitted: đ ${formatVndAmount(Number(member.waitingTransfer?.amount || member.waitingAmount || 0))}`}</p>
+                              )}
+                            </div>
+                            {hasWaitingTransfer ? (
+                              <button
+                                type="button"
+                                className="badge bg-success-50 text-success-700 transition hover:opacity-90 disabled:opacity-50"
+                                onClick={() => handleConfirmPaymentReceived(member.waitingTransfer.id)}
+                                disabled={paymentActionId === `confirm-${member.waitingTransfer.id}` || Boolean(paymentActionId)}
+                              >
+                                {paymentActionId === `confirm-${member.waitingTransfer.id}` ? '...' : 'Confirm Received'}
+                              </button>
+                            ) : (
+                              <Badge status="warning">Pending</Badge>
+                            )}
+                          </div>
                         </div>
-                        {canManageTreasury ? (
-                          <button
-                            type="button"
-                            className="badge bg-success-50 text-success-700 transition hover:opacity-90 disabled:opacity-50"
-                            onClick={() => handleConfirmPaymentReceived(payment.id)}
-                            disabled={paymentActionId === `confirm-${payment.id}`}
-                          >
-                            {paymentActionId === `confirm-${payment.id}` ? '...' : 'Confirm Received'}
-                          </button>
-                        ) : (
-                          <Badge status="warning">Waiting Treasurer</Badge>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </Card>
-              )}
+                      )
+                    })
+                  )}
+                </div>
+
+                <div className="space-y-2 pt-1">
+                  <p className="text-xs font-semibold uppercase text-neutral-600">Need Reimbursement</p>
+                  {membersNeedingPayout.length === 0 ? (
+                    <p className="text-xs text-neutral-500">No members are waiting for reimbursement.</p>
+                  ) : (
+                    membersNeedingPayout.map((member) => (
+                      <button
+                        key={`payout-${member.user_id}`}
+                        type="button"
+                        className="w-full rounded-xl border border-neutral-200 p-3 text-left transition hover:bg-neutral-50"
+                        onClick={() => handleOpenPayoutModal(member)}
+                        disabled={!canManageTreasury || !isJoiningClosed}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <p className="text-sm font-semibold">
+                              {member.name}
+                              {String(member.user_id) === String(treasuryUserId) ? ' (Treasurer)' : ''}
+                            </p>
+                            <p className="text-xs text-neutral-600">{`Expected payout: đ ${formatVndAmount(member.payoutNeeded)}`}</p>
+                          </div>
+                          <Badge status={member.waitingTransfer ? 'warning' : 'default'}>
+                            {member.waitingTransfer ? 'Waiting Confirm' : 'Transfer'}
+                          </Badge>
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </Card>
 
               <Card className="mt-3 space-y-3">
                 <div className="flex items-center justify-between">
@@ -1320,7 +1407,7 @@ export const EventDetailPage = () => {
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                   <div>
                     <p className="text-xs text-neutral-600">Treasury Received</p>
-                    <p className="font-semibold text-success-700">{`đ ${formatVndAmount(confirmedToTreasuryAmount)}`}</p>
+                    <p className="font-semibold text-success-700">{`đ ${formatVndAmount(treasuryReceivedAmount)}`}</p>
                   </div>
                   <div>
                     <p className="text-xs text-neutral-600">Treasury Sent</p>
@@ -1400,40 +1487,6 @@ export const EventDetailPage = () => {
                   </div>
                 </div>
               </Card>
-
-              {membersNeedingPayout.length > 0 && (
-                <Card className="mt-3 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs text-neutral-600 uppercase">Members To Reimburse</p>
-                    <Badge status="warning">{membersNeedingPayout.length}</Badge>
-                  </div>
-                  <div className="space-y-2">
-                    {membersNeedingPayout.map((member) => (
-                      <button
-                        key={member.user_id}
-                        type="button"
-                        className="w-full rounded-xl border border-neutral-200 p-3 text-left transition hover:bg-neutral-50"
-                        onClick={() => handleOpenPayoutModal(member)}
-                        disabled={!canManageTreasury || !isJoiningClosed}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <div>
-                            <p className="text-sm font-semibold">
-                              {member.name}
-                              {String(member.user_id) === String(treasuryUserId) ? ' (Treasurer)' : ''}
-                            </p>
-                            <p className="text-xs text-neutral-600">{`Need payout: đ ${formatVndAmount(member.payoutNeeded)}`}</p>
-                          </div>
-                          <Badge status={member.waitingTransfer ? 'warning' : 'default'}>
-                            {member.waitingTransfer ? 'Waiting Confirm' : 'Transfer'}
-                          </Badge>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </Card>
-              )}
-
 
             </motion.div>
             )}
@@ -1535,10 +1588,10 @@ export const EventDetailPage = () => {
                   Expenses
                 </h2>
                 <Button
-                  onClick={() => setExpenseModalOpen(true)}
+                  onClick={handleOpenExpenseModal}
                   variant="secondary"
                   className="px-3 py-1 text-xs"
-                  disabled={!isCheckedIn || !isJoiningClosed || isExpenseAddingClosed}
+                  disabled={!canOpenExpenseModal}
                 >
                   Add
                 </Button>
@@ -1553,7 +1606,7 @@ export const EventDetailPage = () => {
                   Expense adding is closed for this event.
                 </p>
               )}
-              {!isCheckedIn && (
+              {!isCheckedIn && !isTeamTreasurer && (
                 <p className="text-xs text-neutral-600 mb-3">
                   Check in first to add your expense to this event.
                 </p>
@@ -1568,7 +1621,10 @@ export const EventDetailPage = () => {
                     <Card key={expense.id} className="flex items-center justify-between">
                       <div>
                         <p className="text-sm font-semibold">{expense.description}</p>
-                        <p className="text-xs text-neutral-600">{expense.users?.name}</p>
+                        <p className="text-xs text-neutral-600">{expense.users?.name || 'Member'}</p>
+                        {expense.added_by && String(expense.added_by) !== String(expense.user_id) && (
+                          <p className="text-xs text-neutral-500">{`Added by ${expense.added_by_user?.name || 'Unknown'}`}</p>
+                        )}
                       </div>
                       <div className="text-right">
                         <p className="font-bold text-primary-400">{`đ ${formatVndAmount(expense.amount)}`}</p>
@@ -1711,7 +1767,7 @@ export const EventDetailPage = () => {
             <Button
               onClick={handleCreateExpense}
               className="flex-1"
-              disabled={!expenseForm.amount || !expenseForm.description || !isCheckedIn || !isJoiningClosed}
+              disabled={!expenseForm.amount || !expenseForm.description || !canOpenExpenseModal || !isSelectedExpenseOwnerValid}
               loading={actionLoading}
             >
               Add
@@ -1720,6 +1776,27 @@ export const EventDetailPage = () => {
         }
       >
         <div className="space-y-4">
+          {isTeamTreasurer && (
+            <div>
+              <label className="block text-sm font-medium text-neutral-700 mb-2">Add For</label>
+              <select
+                className="input-field"
+                value={expenseForm.expenseForUserId}
+                onChange={(e) => setExpenseForm((prev) => ({
+                  ...prev,
+                  expenseForUserId: e.target.value,
+                }))}
+              >
+                <option value="">Myself (default)</option>
+                {checkedInParticipantOptions.map((participant) => (
+                  <option key={participant.user_id} value={participant.user_id}>
+                    {participant.name}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-neutral-500">Leave empty to record your own expense.</p>
+            </div>
+          )}
           <Input
             label="Description"
             value={expenseForm.description}

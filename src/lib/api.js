@@ -58,7 +58,7 @@ const attachExpenseUsers = async (rows, fields = 'id, name') => {
   const userIds = [
     ...new Set(
       rows
-        .flatMap((row) => [row.user_id, row.approved_by])
+        .flatMap((row) => [row.user_id, row.approved_by, row.added_by])
         .filter(Boolean)
     ),
   ]
@@ -76,6 +76,7 @@ const attachExpenseUsers = async (rows, fields = 'id, name') => {
     ...row,
     users: usersById.get(String(row.user_id)) || null,
     approved_by_user: usersById.get(String(row.approved_by)) || null,
+    added_by_user: usersById.get(String(row.added_by)) || null,
   }))
 }
 
