@@ -1198,6 +1198,52 @@ alter table public.app_signup_secrets
 add constraint app_signup_secrets_used_count_limit
 check (used_count <= max_uses);
 
+create or replace function public.deactivate_stale_app_signup_secrets()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_updated_count integer := 0;
+begin
+  update public.app_signup_secrets s
+  set is_active = false
+  where s.is_active = true
+    and (
+      s.expires_at <= now()
+      or s.used_count >= s.max_uses
+    );
+
+  get diagnostics v_updated_count = row_count;
+  return v_updated_count;
+end;
+$$;
+
+select public.deactivate_stale_app_signup_secrets();
+
+do $$
+declare
+  v_job_id bigint;
+begin
+  create extension if not exists pg_cron;
+
+  for v_job_id in
+    select jobid
+    from cron.job
+    where jobname = 'deactivate-app-signup-secrets'
+  loop
+    perform cron.unschedule(v_job_id);
+  end loop;
+
+  perform cron.schedule(
+    'deactivate-app-signup-secrets',
+    '*/5 * * * *',
+    'select public.deactivate_stale_app_signup_secrets();'
+  );
+end
+$$;
+
 alter table public.team_members
 drop column if exists role;
 

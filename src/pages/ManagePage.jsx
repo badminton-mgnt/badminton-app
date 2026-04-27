@@ -16,6 +16,13 @@ import { motion } from 'framer-motion'
 import { Settings2 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 
+const maskAppSecretKey = (secretKey) => {
+  const key = String(secretKey || '')
+  if (!key) return ''
+  if (key.length <= 10) return key
+  return `${key.slice(0, 8)}...${key.slice(-4)}`
+}
+
 export const ManagePage = () => {
   const navigate = useNavigate()
   const { user } = useAuth()
@@ -140,7 +147,7 @@ export const ManagePage = () => {
       setSecretError('')
       const createdSecret = await createAppSignupSecret({ maxUses: 10, expiresInHours: 1 })
       setAppSecrets((prev) => [createdSecret, ...prev])
-      setSecretFeedback(`Created key: ${createdSecret.secret_key}`)
+      setSecretFeedback('Key created')
     } catch (error) {
       console.error('Error generating app secret:', error)
       setSecretError(error?.message || 'Unable to generate app secret key.')
@@ -150,6 +157,18 @@ export const ManagePage = () => {
   }
 
   const handleRevokeSecret = async (secretId) => {
+    const targetSecret = appSecrets.find((secret) => secret.id === secretId)
+    if (!targetSecret) return
+
+    const expiresAtMs = toUnixTimestamp(targetSecret.expires_at)
+    const isExpired = expiresAtMs === null ? false : expiresAtMs <= Date.now()
+    const isUsedUp = Number(targetSecret.used_count || 0) >= Number(targetSecret.max_uses || 0)
+    const canRevoke = Boolean(targetSecret.is_active) && !isExpired && !isUsedUp
+
+    if (!canRevoke) {
+      return
+    }
+
     try {
       setActionTargetId(`secret-revoke-${secretId}`)
       setSecretFeedback('')
@@ -176,7 +195,7 @@ export const ManagePage = () => {
   const handleCopySecret = async (secretKey) => {
     try {
       await navigator.clipboard.writeText(secretKey)
-      setSecretFeedback(`Copied key: ${secretKey}`)
+      setSecretFeedback('Key copied')
       setSecretError('')
     } catch (error) {
       console.error('Error copying app secret:', error)
@@ -383,12 +402,15 @@ export const ManagePage = () => {
                         appSecrets.map((secret) => {
                           const expiresAtMs = toUnixTimestamp(secret.expires_at)
                           const isExpired = expiresAtMs === null ? false : expiresAtMs <= Date.now()
+                          const isUsedUp = Number(secret.used_count || 0) >= Number(secret.max_uses || 0)
+                          const canRevoke = Boolean(secret.is_active) && !isExpired && !isUsedUp
+                          const shouldShowActions = Boolean(secret.is_active) && !isExpired
                           const usageLabel = `${secret.used_count}/${secret.max_uses}`
                           const statusLabel = !secret.is_active
                             ? 'Revoked'
                             : isExpired
                               ? 'Expired'
-                              : secret.used_count >= secret.max_uses
+                              : isUsedUp
                                 ? 'Used up'
                                 : 'Active'
 
@@ -397,7 +419,7 @@ export const ManagePage = () => {
                               <div className="space-y-2">
                                 <div className="flex items-start justify-between gap-3">
                                   <div>
-                                    <p className="font-semibold text-sm break-all">{secret.secret_key}</p>
+                                    <p className="font-semibold text-sm break-all">{maskAppSecretKey(secret.secret_key)}</p>
                                     <p className="text-xs text-neutral-500">
                                       Created by {secret.users?.name || 'Admin'} • {formatVietnamDateTime(secret.created_at, '-')}
                                     </p>
@@ -413,24 +435,26 @@ export const ManagePage = () => {
                                   {secret.revoked_at ? <span>Revoked: {formatVietnamDateTime(secret.revoked_at, '-')}</span> : null}
                                 </div>
 
-                                <div className="flex gap-2">
-                                  <Button
-                                    variant="secondary"
-                                    className="flex-1"
-                                    onClick={() => handleCopySecret(secret.secret_key)}
-                                  >
-                                    Copy
-                                  </Button>
-                                  <Button
-                                    variant="danger"
-                                    className="flex-1"
-                                    onClick={() => handleRevokeSecret(secret.id)}
-                                    loading={actionTargetId === `secret-revoke-${secret.id}`}
-                                    disabled={!secret.is_active || actionTargetId === `secret-revoke-${secret.id}`}
-                                  >
-                                    Revoke
-                                  </Button>
-                                </div>
+                                {shouldShowActions ? (
+                                  <div className="flex gap-2">
+                                    <Button
+                                      variant="secondary"
+                                      className="flex-1"
+                                      onClick={() => handleCopySecret(secret.secret_key)}
+                                    >
+                                      Copy
+                                    </Button>
+                                    <Button
+                                      variant="danger"
+                                      className="flex-1"
+                                      onClick={() => handleRevokeSecret(secret.id)}
+                                      loading={actionTargetId === `secret-revoke-${secret.id}`}
+                                      disabled={!canRevoke || actionTargetId === `secret-revoke-${secret.id}`}
+                                    >
+                                      Revoke
+                                    </Button>
+                                  </div>
+                                ) : null}
                               </div>
                             </Card>
                           )
