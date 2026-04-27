@@ -161,6 +161,14 @@ CREATE TABLE IF NOT EXISTS notifications (
   created_at TIMESTAMP DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS app_runtime_configs (
+  config_key TEXT PRIMARY KEY,
+  config_value TEXT NOT NULL,
+  updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  updated_at TIMESTAMP NOT NULL DEFAULT now(),
+  description TEXT
+);
+
 -- Enable RLS (Row Level Security)
 
 -- =====================================================
@@ -187,6 +195,7 @@ END $$;
 
 alter table public.users enable row level security;
 alter table public.app_signup_secrets enable row level security;
+alter table public.app_runtime_configs enable row level security;
 alter table public.teams enable row level security;
 alter table public.team_deletion_logs enable row level security;
 alter table public.team_members enable row level security;
@@ -249,6 +258,40 @@ with check (
     from public.users u
     where u.id = auth.uid()
     and u.role = 'admin'
+  )
+);
+
+create policy "admin view app runtime configs"
+on public.app_runtime_configs
+for select
+to authenticated
+using (
+  exists (
+    select 1
+    from public.users u
+    where u.id = auth.uid()
+      and lower(coalesce(u.role, '')) = 'admin'
+  )
+);
+
+create policy "admin manage app runtime configs"
+on public.app_runtime_configs
+for all
+to authenticated
+using (
+  exists (
+    select 1
+    from public.users u
+    where u.id = auth.uid()
+      and lower(coalesce(u.role, '')) = 'admin'
+  )
+)
+with check (
+  exists (
+    select 1
+    from public.users u
+    where u.id = auth.uid()
+      and lower(coalesce(u.role, '')) = 'admin'
   )
 );
 
@@ -1240,6 +1283,103 @@ begin
     'deactivate-app-signup-secrets',
     '*/5 * * * *',
     'select public.deactivate_stale_app_signup_secrets();'
+  );
+end
+$$;
+
+insert into public.app_runtime_configs (config_key, config_value, description)
+values (
+  'notifications_retention_days',
+  '10',
+  'Retention window in days for notifications cleanup job (admin configurable).'
+)
+on conflict (config_key) do nothing;
+
+create or replace function public.set_notifications_retention_days(p_days integer)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'Authentication required';
+  end if;
+
+  if not exists (
+    select 1
+    from public.users u
+    where u.id = auth.uid()
+      and lower(coalesce(u.role, '')) = 'admin'
+  ) then
+    raise exception 'Only admin can configure notifications retention';
+  end if;
+
+  if coalesce(p_days, 0) < 1 or p_days > 365 then
+    raise exception 'notifications_retention_days must be between 1 and 365';
+  end if;
+
+  insert into public.app_runtime_configs (config_key, config_value, updated_by, updated_at)
+  values ('notifications_retention_days', p_days::text, auth.uid(), now())
+  on conflict (config_key)
+  do update set
+    config_value = excluded.config_value,
+    updated_by = excluded.updated_by,
+    updated_at = excluded.updated_at;
+end;
+$$;
+
+grant execute on function public.set_notifications_retention_days(integer) to authenticated;
+
+create or replace function public.cleanup_old_notifications()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_retention_days integer := 10;
+  v_deleted_count integer := 0;
+begin
+  select
+    case
+      when c.config_value ~ '^\\d+$' then greatest(c.config_value::integer, 1)
+      else 10
+    end
+  into v_retention_days
+  from public.app_runtime_configs c
+  where c.config_key = 'notifications_retention_days';
+
+  v_retention_days := greatest(coalesce(v_retention_days, 10), 1);
+
+  delete from public.notifications n
+  where n.created_at < now() - make_interval(days => v_retention_days);
+
+  get diagnostics v_deleted_count = row_count;
+  return v_deleted_count;
+end;
+$$;
+
+select public.cleanup_old_notifications();
+
+do $$
+declare
+  v_job_id bigint;
+begin
+  create extension if not exists pg_cron;
+
+  for v_job_id in
+    select jobid
+    from cron.job
+    where jobname = 'cleanup-old-notifications'
+  loop
+    perform cron.unschedule(v_job_id);
+  end loop;
+
+  perform cron.schedule(
+    'cleanup-old-notifications',
+    '0 * * * *',
+    'select public.cleanup_old_notifications();'
   );
 end
 $$;

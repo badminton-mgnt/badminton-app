@@ -6,9 +6,11 @@ import {
   revokeAppSignupSecret,
   deleteUserProfile,
   getAllTeams,
+  getNotificationsRetentionDays,
   getAppSignupSecrets,
   getAppUsers,
   getUserProfile,
+  updateNotificationsRetentionDays,
   updateUserRole,
 } from '../lib/api'
 import { formatVietnamDate, formatVietnamDateTime, toUnixTimestamp } from '../lib/dateTime'
@@ -33,12 +35,16 @@ export const ManagePage = () => {
   const [activeTab, setActiveTab] = useState('teams')
   const [actionTargetId, setActionTargetId] = useState(null)
   const [userSearch, setUserSearch] = useState('')
+  const [notificationsRetentionDays, setNotificationsRetentionDays] = useState('10')
+  const [notificationsRetentionFeedback, setNotificationsRetentionFeedback] = useState('')
+  const [notificationsRetentionError, setNotificationsRetentionError] = useState('')
   const [secretFeedback, setSecretFeedback] = useState('')
   const [secretError, setSecretError] = useState('')
   const [userModalOpen, setUserModalOpen] = useState(false)
   const [selectedUser, setSelectedUser] = useState(null)
   const [nextRole, setNextRole] = useState('user')
   const [modalActionLoading, setModalActionLoading] = useState(false)
+  const [deleteUserConfirmOpen, setDeleteUserConfirmOpen] = useState(false)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -56,12 +62,14 @@ export const ManagePage = () => {
       let nextTeams = []
       let nextUsers = []
       let nextSecrets = []
+      let nextNotificationsRetentionDays = 10
 
       if (isAdminRole) {
-        const [teamsData, usersData, secretsData] = await Promise.allSettled([
+        const [teamsData, usersData, secretsData, retentionDaysData] = await Promise.allSettled([
           getAllTeams(),
           getAppUsers(),
           getAppSignupSecrets(),
+          getNotificationsRetentionDays(),
         ])
 
         if (teamsData.status === 'fulfilled') {
@@ -81,11 +89,18 @@ export const ManagePage = () => {
         } else {
           console.error('Error loading app secrets:', secretsData.reason)
         }
+
+        if (retentionDaysData.status === 'fulfilled') {
+          nextNotificationsRetentionDays = retentionDaysData.value
+        } else {
+          console.error('Error loading notifications retention days:', retentionDaysData.reason)
+        }
       }
 
       setTeams(nextTeams)
       setAppUsers(nextUsers)
       setAppSecrets(nextSecrets)
+      setNotificationsRetentionDays(String(nextNotificationsRetentionDays))
     } catch (error) {
       console.error('Error loading manage data:', error)
     } finally {
@@ -101,9 +116,15 @@ export const ManagePage = () => {
 
   const closeUserModal = () => {
     setUserModalOpen(false)
+    setDeleteUserConfirmOpen(false)
     setSelectedUser(null)
     setNextRole('user')
     setModalActionLoading(false)
+  }
+
+  const handleRequestDeleteUser = () => {
+    if (!selectedUser) return
+    setDeleteUserConfirmOpen(true)
   }
 
   const handleSaveRole = async () => {
@@ -203,6 +224,23 @@ export const ManagePage = () => {
     }
   }
 
+  const handleSaveNotificationsRetentionDays = async () => {
+    try {
+      setActionTargetId('notifications-retention-save')
+      setNotificationsRetentionFeedback('')
+      setNotificationsRetentionError('')
+
+      const savedDays = await updateNotificationsRetentionDays(notificationsRetentionDays)
+      setNotificationsRetentionDays(String(savedDays))
+      setNotificationsRetentionFeedback('Saved')
+    } catch (error) {
+      console.error('Error updating notifications retention days:', error)
+      setNotificationsRetentionError(error?.message || 'Unable to update notifications retention days.')
+    } finally {
+      setActionTargetId(null)
+    }
+  }
+
   const isAdmin = (profile?.role || '').toLowerCase() === 'admin'
   const normalizedUserSearch = userSearch.trim().toLowerCase()
   const filteredAppUsers = useMemo(
@@ -262,7 +300,7 @@ export const ManagePage = () => {
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500 px-2">
                   Sections
                 </p>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   <button
                     type="button"
                     className={`rounded-lg border px-3 py-2.5 text-xs font-semibold transition ${
@@ -295,6 +333,17 @@ export const ManagePage = () => {
                     onClick={() => setActiveTab('app-secrets')}
                   >
                     App Secrets
+                  </button>
+                  <button
+                    type="button"
+                    className={`rounded-lg border px-3 py-2.5 text-xs font-semibold transition ${
+                      activeTab === 'app-settings'
+                        ? 'border-primary-400 bg-primary-400 text-white shadow-sm'
+                        : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50'
+                    }`}
+                    onClick={() => setActiveTab('app-settings')}
+                  >
+                    App Settings
                   </button>
                 </div>
               </Card>
@@ -370,7 +419,7 @@ export const ManagePage = () => {
                     </div>
                   </Card>
                 </div>
-              ) : (
+              ) : activeTab === 'app-secrets' ? (
                 <div className="space-y-4">
                   <Card className="space-y-4">
                     <div className="flex items-center justify-between gap-3">
@@ -463,6 +512,49 @@ export const ManagePage = () => {
                     </div>
                   </Card>
                 </div>
+              ) : (
+                <div className="space-y-4">
+                  <Card className="space-y-4">
+                    <div>
+                      <h3 className="text-sm font-semibold text-neutral-700 uppercase">App Settings</h3>
+                      <p className="text-xs text-neutral-500">Global settings for app behavior.</p>
+                    </div>
+
+                    <div className="space-y-3 rounded-xl border border-neutral-200 bg-neutral-50 p-3">
+                      <div>
+                        <p className="text-sm font-semibold text-neutral-800">Notifications Retention Days</p>
+                        <p className="text-xs text-neutral-600">Notifications older than this value are deleted automatically by cron.</p>
+                      </div>
+
+                      <Input
+                        label="Retention Days"
+                        type="number"
+                        min={1}
+                        max={365}
+                        value={notificationsRetentionDays}
+                        onChange={(e) => setNotificationsRetentionDays(e.target.value.replace(/\D/g, '').slice(0, 3))}
+                        placeholder="10"
+                      />
+
+                      {notificationsRetentionFeedback ? (
+                        <div className="bg-success-50 text-success-800 p-3 rounded-xl text-sm">{notificationsRetentionFeedback}</div>
+                      ) : null}
+
+                      {notificationsRetentionError ? (
+                        <div className="bg-error-50 text-error-800 p-3 rounded-xl text-sm">{notificationsRetentionError}</div>
+                      ) : null}
+
+                      <Button
+                        onClick={handleSaveNotificationsRetentionDays}
+                        loading={actionTargetId === 'notifications-retention-save'}
+                        disabled={!notificationsRetentionDays || actionTargetId === 'notifications-retention-save'}
+                        className="w-full"
+                      >
+                        Save
+                      </Button>
+                    </div>
+                  </Card>
+                </div>
               )}
             </motion.div>
           </>
@@ -478,7 +570,7 @@ export const ManagePage = () => {
             <Button
               variant="danger"
               className="flex-1"
-              onClick={handleDeleteUser}
+              onClick={handleRequestDeleteUser}
               loading={modalActionLoading && actionTargetId === `delete-${selectedUser?.id}`}
               disabled={!selectedUser || String(selectedUser.id) === String(user.id) || (selectedUser?.role || '').toLowerCase() === 'admin'}
             >
@@ -514,6 +606,37 @@ export const ManagePage = () => {
             </select>
           </div>
         </div>
+      </Modal>
+
+      <Modal
+        isOpen={deleteUserConfirmOpen}
+        onClose={() => setDeleteUserConfirmOpen(false)}
+        title="Delete User"
+        footer={(
+          <div className="flex gap-2 w-full">
+            <Button
+              variant="secondary"
+              className="flex-1"
+              onClick={() => setDeleteUserConfirmOpen(false)}
+              disabled={modalActionLoading && actionTargetId === `delete-${selectedUser?.id}`}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              className="flex-1"
+              onClick={handleDeleteUser}
+              loading={modalActionLoading && actionTargetId === `delete-${selectedUser?.id}`}
+              disabled={!selectedUser || String(selectedUser.id) === String(user.id) || (selectedUser?.role || '').toLowerCase() === 'admin'}
+            >
+              Delete
+            </Button>
+          </div>
+        )}
+      >
+        <p className="text-sm text-neutral-600">
+          {`Are you sure you want to delete user "${selectedUser?.name || ''}"? This action cannot be undone.`}
+        </p>
       </Modal>
 
       <BottomNav />
