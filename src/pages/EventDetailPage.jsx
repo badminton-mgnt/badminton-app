@@ -26,6 +26,7 @@ import {
 } from '../lib/checkinCache'
 import { formatVndAmount } from '../lib/currency'
 import { formatBangkokDateTime, getBangkokDateKey, toDateTimeLocalValue, toSupabaseDateTime } from '../lib/dateTime'
+import { isSettlementTransferFeatureGloballyEnabled } from '../lib/featureFlags'
 import { motion } from 'framer-motion'
 import { CheckCircle2, QrCode } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
@@ -42,6 +43,7 @@ export const EventDetailPage = () => {
   const { user } = useAuth()
   const [event, setEvent] = useState(null)
   const [participants, setParticipants] = useState([])
+  const [isCurrentUserParticipant, setIsCurrentUserParticipant] = useState(false)
   const [teamMembers, setTeamMembers] = useState([])
   const [teamMemberCount, setTeamMemberCount] = useState(0)
   const [expenses, setExpenses] = useState([])
@@ -65,6 +67,8 @@ export const EventDetailPage = () => {
   const [paymentTargetInfo, setPaymentTargetInfo] = useState(null)
   const [loadingReceiverInfo, setLoadingReceiverInfo] = useState(false)
   const [receiverPaymentInfoError, setReceiverPaymentInfoError] = useState('')
+  const [teamSettlementTransferFeatureEnabled, setTeamSettlementTransferFeatureEnabled] = useState(false)
+  const [teamSettlementAutoConfirmMinutes, setTeamSettlementAutoConfirmMinutes] = useState(15)
   const [activeTab, setActiveTab] = useState('settlement')
   const [selectedMembersToAdd, setSelectedMembersToAdd] = useState([])
   const [participantActionLoading, setParticipantActionLoading] = useState(false)
@@ -106,23 +110,14 @@ export const EventDetailPage = () => {
       const expensesData = expensesResult.status === 'fulfilled' ? expensesResult.value : null
       let transfersData = transfersResult.status === 'fulfilled' ? transfersResult.value : null
       const profileData = profileResult.status === 'fulfilled' ? profileResult.value : null
+      let teamFeatureEnabled = false
+      let teamAutoConfirmMinutes = 15
       const normalizedRole = (profileData?.role || 'user').toLowerCase()
       const isAccessBypassRole = ['admin', 'sub_admin'].includes(normalizedRole)
-      const isCurrentUserParticipant = Array.isArray(participantsData)
+      const hasParticipantRecord = Array.isArray(participantsData)
         ? participantsData.some((participant) => String(participant.user_id) === String(user.id))
         : false
-
-      if (!isAccessBypassRole && !isCurrentUserParticipant) {
-        setLoadError('You can only view event details after joining this event.')
-        setEvent(null)
-        setParticipants([])
-        setExpenses([])
-        setPaymentTransfers([])
-        setTeamMembers([])
-        setTeamMemberCount(0)
-        setTeamTreasurerId(null)
-        return
-      }
+      setIsCurrentUserParticipant(isAccessBypassRole || hasParticipantRecord)
 
       setEvent(eventData)
       let treasuryUserId = null
@@ -144,14 +139,57 @@ export const EventDetailPage = () => {
         if (teamResult.status === 'fulfilled') {
           treasuryUserId = teamResult.value?.treasurer_id || null
           setTeamTreasurerId(treasuryUserId)
+          teamFeatureEnabled = Boolean(teamResult.value?.settlement_transfer_feature_enabled)
+          teamAutoConfirmMinutes = Number(teamResult.value?.settlement_auto_confirm_minutes || 15)
+          setTeamSettlementTransferFeatureEnabled(teamFeatureEnabled)
+          setTeamSettlementAutoConfirmMinutes(teamAutoConfirmMinutes)
         } else {
           console.error('Error loading team detail:', teamResult.reason)
           setTeamTreasurerId(null)
+          setTeamSettlementTransferFeatureEnabled(false)
+          setTeamSettlementAutoConfirmMinutes(15)
         }
       } else {
         setTeamMembers([])
         setTeamMemberCount(0)
         setTeamTreasurerId(null)
+        setTeamSettlementTransferFeatureEnabled(false)
+        setTeamSettlementAutoConfirmMinutes(15)
+      }
+
+      if (
+        Array.isArray(transfersData)
+        && treasuryUserId
+        && isSettlementTransferFeatureGloballyEnabled
+        && teamFeatureEnabled
+      ) {
+        const timeoutMinutes = Math.max(Number(teamAutoConfirmMinutes || 15), 1)
+        const timeoutMs = timeoutMinutes * 60 * 1000
+        const nowMs = Date.now()
+        const waitingStatuses = ['WAITING_CONFIRM', 'WAITING', 'PENDING']
+        const staleIncomingTransfers = transfersData.filter((transfer) => {
+          const transferStatus = String(transfer?.status || '').toUpperCase()
+          const transferDirection = String(transfer?.direction || '').toUpperCase()
+          const transferCreatedAtMs = transfer?.created_at ? new Date(transfer.created_at).getTime() : Number.NaN
+
+          return (
+            String(transfer?.to_user_id) === String(user.id)
+            && transferDirection === 'FROM_TREASURY'
+            && waitingStatuses.includes(transferStatus)
+            && Number.isFinite(transferCreatedAtMs)
+            && nowMs - transferCreatedAtMs >= timeoutMs
+          )
+        })
+
+        if (staleIncomingTransfers.length > 0) {
+          for (const transfer of staleIncomingTransfers) {
+            await confirmPaymentTransfer(transfer.id, {
+              confirmedBy: user.id,
+              confirmationMethod: 'AUTO_TIMEOUT',
+            })
+          }
+          transfersData = await getEventPaymentTransfers(eventId)
+        }
       }
 
       if (participantsData) {
@@ -286,6 +324,7 @@ export const EventDetailPage = () => {
   const canManageParticipantCheckIn = ['admin', 'sub_admin'].includes(currentUserRole) || isTeamTreasurer
   const canAutoApproveExpense = ['admin', 'sub_admin'].includes(currentUserRole) || isTeamTreasurer
   const canManageTreasury = isTeamTreasurer
+  const isSettlementTransferEnabled = isSettlementTransferFeatureGloballyEnabled && teamSettlementTransferFeatureEnabled
   const normalizedEventStatus = String(event?.status || '').toUpperCase()
   const isSettlementCompleted = normalizedEventStatus === 'COMPLETED'
   const isJoiningClosed = ['FINALIZED', 'COMPLETED'].includes(normalizedEventStatus)
@@ -309,11 +348,12 @@ export const EventDetailPage = () => {
     !canBypassCheckInGate &&
     requiresCheckInForDetails &&
     (isToday || (isEventPast && isWithinCheckInWindow))
+  const hasParticipantAccess = canBypassCheckInGate || isCurrentUserParticipant
   const headerStatusLabel = isToday ? 'Today' : isUpcomingEvent ? 'Upcoming' : ''
   const headerStatusBadge = isToday ? 'success' : isUpcomingEvent ? 'warning' : 'default'
   const currentParticipant = participants.find((participant) => String(participant.user_id) === String(user.id))
   const isCheckedIn = isParticipantCheckedIn(currentParticipant) || hasCheckedInEvent(user.id, eventId)
-  const canViewProtectedDetails = !shouldRequireCheckInForAccess || isCheckedIn
+  const canViewProtectedDetails = hasParticipantAccess && (!shouldRequireCheckInForAccess || isCheckedIn)
   const checkedInAtLabel = currentParticipant?.checked_in_at
     ? formatBangkokDateTime(currentParticipant.checked_in_at)
     : ''
@@ -340,7 +380,7 @@ export const EventDetailPage = () => {
   }
 
   const handleCheckIn = async () => {
-    if (!isWithinCheckInWindow || isJoiningClosed) {
+    if (!isToday || isJoiningClosed || isUpcomingEvent) {
       return
     }
 
@@ -411,13 +451,54 @@ export const EventDetailPage = () => {
     }
   }
 
-  const handleConfirmPaymentReceived = async (transferId) => {
+  const handleConfirmPaymentReceived = async (transfer, options = {}) => {
+    if (!transfer?.id) return
+
     try {
-      setPaymentActionId(`confirm-${transferId}`)
-      await confirmPaymentTransfer(transferId)
+      setPaymentActionId(`confirm-${transfer.id}`)
+      const transferDirection = String(transfer.direction || '').toUpperCase()
+      const confirmationMethod = options.confirmationMethod
+        || (isTeamTreasurer && transferDirection === 'TO_TREASURY' ? 'TREASURER_MANUAL' : 'RECEIVER_MANUAL')
+
+      await confirmPaymentTransfer(transfer.id, {
+        confirmedBy: user.id,
+        confirmationMethod,
+      })
       await loadData()
     } catch (error) {
       console.error('Error confirming payment:', error)
+    } finally {
+      setPaymentActionId(null)
+    }
+  }
+
+  const handleTreasurerMarkReceivedDirectly = async (member) => {
+    if (!isTeamTreasurer || !canRunSettlement || !teamTreasurerId || !isSettlementTransferEnabled) {
+      return
+    }
+
+    const amount = Math.max(Number(member?.amountToTreasury || 0), 0)
+    if (!member?.user_id || amount <= 0 || !event?.team_id) {
+      return
+    }
+
+    try {
+      setPaymentActionId(`force-${member.user_id}`)
+      await createPaymentTransfer({
+        team_id: event.team_id,
+        event_id: eventId,
+        from_user_id: member.user_id,
+        to_user_id: teamTreasurerId,
+        amount,
+        direction: 'TO_TREASURY',
+        status: 'CONFIRMED',
+        confirmed_at: new Date().toISOString(),
+        confirmed_by: user.id,
+        confirmation_method: 'TREASURER_MANUAL',
+      })
+      await loadData()
+    } catch (error) {
+      console.error('Error marking member payment as received:', error)
     } finally {
       setPaymentActionId(null)
     }
@@ -603,7 +684,6 @@ export const EventDetailPage = () => {
   const totalExpense = approvedExpenses.reduce((sum, expense) => sum + parseFloat(expense.amount), 0)
   const canRunSettlement = isJoiningClosed && isExpenseAddingClosed
   const share = canRunSettlement && checkedInCount > 0 ? Math.round((totalExpense / checkedInCount) * 100) / 100 : 0
-  const userShare = isCheckedIn ? share : 0
   const treasuryUserId = teamTreasurerId
   const transferStatus = (status) => String(status || '').toUpperCase()
   const transferDirection = (direction) => String(direction || '').toUpperCase().trim()
@@ -615,6 +695,13 @@ export const EventDetailPage = () => {
     isToTreasuryDirection(transfer.direction) || (!transfer.direction && String(transfer.to_user_id) === String(treasuryUserId))
   const isFromTreasuryTransfer = (transfer) =>
     isFromTreasuryDirection(transfer.direction) || (!transfer.direction && String(transfer.from_user_id) === String(treasuryUserId))
+  const hasSettlementTransferActivity = paymentTransfers.some(
+    (transfer) =>
+      (String(transfer.from_user_id) === String(user.id) || String(transfer.to_user_id) === String(user.id))
+      && (isToTreasuryTransfer(transfer) || isFromTreasuryTransfer(transfer))
+  )
+  const isCurrentUserActiveInSettlement = isCheckedIn || hasSettlementTransferActivity
+  const userShare = isCurrentUserActiveInSettlement ? share : 0
   const getParticipantSettlement = (participantUserId, participantCheckedIn = true) => {
     if (!participantCheckedIn || !canRunSettlement) {
       return {
@@ -693,7 +780,7 @@ export const EventDetailPage = () => {
     }
   }
 
-  const currentUserSettlement = getParticipantSettlement(user.id, isCheckedIn)
+  const currentUserSettlement = getParticipantSettlement(user.id, isCurrentUserActiveInSettlement)
   const confirmedUserToTreasuryAmount = currentUserSettlement.confirmedPaidToTreasury
   const waitingUserToTreasuryAmount = currentUserSettlement.waitingToTreasuryAmount
   const latestWaitingUserToTreasuryTransfer = currentUserSettlement.latestWaitingToTreasuryTransfer
@@ -713,6 +800,22 @@ export const EventDetailPage = () => {
 
   const confirmedIncomingPayoutAmount = currentUserSettlement.confirmedReimbursedFromTreasury
   const normalizedBalance = currentUserSettlement.normalizedBalance
+  const latestAutoApprovedIncomingPayoutTransfer = paymentTransfers.find(
+    (transfer) =>
+      String(transfer.from_user_id) === String(treasuryUserId)
+      && String(transfer.to_user_id) === String(user.id)
+      && isFromTreasuryTransfer(transfer)
+      && isTransferConfirmed(transfer.status)
+      && String(transfer.confirmation_method || '').toUpperCase() === 'AUTO_TIMEOUT'
+  ) || null
+  const latestTreasurerManualToTreasuryTransfer = paymentTransfers.find(
+    (transfer) =>
+      String(transfer.from_user_id) === String(user.id)
+      && String(transfer.to_user_id) === String(treasuryUserId)
+      && isToTreasuryTransfer(transfer)
+      && isTransferConfirmed(transfer.status)
+      && String(transfer.confirmation_method || '').toUpperCase() === 'TREASURER_MANUAL'
+  ) || null
 
   const waitingConfirmationPayments = paymentTransfers.filter(
     (transfer) =>
@@ -848,6 +951,52 @@ export const EventDetailPage = () => {
       : normalizedBalance > 0
       ? 'The fund will reimburse this amount to you, so you do not need to transfer more.'
       : 'No additional transfer is needed.'
+
+  const transferConfirmationMethodLabel = (transfer) => {
+    const method = String(transfer?.confirmation_method || '').toUpperCase()
+    if (method === 'AUTO_TIMEOUT') return 'Auto timeout'
+    if (method === 'TREASURER_MANUAL') return 'Treasurer manual'
+    return 'Receiver manual'
+  }
+
+  const transferConfirmedByLabel = (transfer) => {
+    if (String(transfer?.confirmation_method || '').toUpperCase() === 'AUTO_TIMEOUT') {
+      return transfer?.to_user?.name || transfer?.to_user?.email || 'Receiver (auto)'
+    }
+    return transfer?.confirmed_by_user?.name || transfer?.to_user?.name || 'Receiver'
+  }
+
+  const waitingIncomingAutoConfirmHint = (() => {
+    if (!waitingIncomingPayoutTransfer || !isSettlementTransferEnabled) {
+      return ''
+    }
+
+    const createdAtMs = waitingIncomingPayoutTransfer?.created_at
+      ? new Date(waitingIncomingPayoutTransfer.created_at).getTime()
+      : Number.NaN
+
+    if (!Number.isFinite(createdAtMs)) {
+      return ''
+    }
+
+    const timeoutMinutes = Math.max(Number(teamSettlementAutoConfirmMinutes || 15), 1)
+    const remainingMs = Math.max((createdAtMs + timeoutMinutes * 60 * 1000) - Date.now(), 0)
+    const remainingMinutes = Math.ceil(remainingMs / (60 * 1000))
+
+    if (remainingMinutes <= 0) {
+      return 'Auto-confirm is processing.'
+    }
+
+    return `Auto-confirm in about ${remainingMinutes} minute(s) if receiver does not confirm manually.`
+  })()
+
+  const manualMarkedPaymentStatusNote = latestTreasurerManualToTreasuryTransfer
+    ? `Treasurer marked your payment as received${latestTreasurerManualToTreasuryTransfer.confirmed_at ? ` at ${formatBangkokDateTime(latestTreasurerManualToTreasuryTransfer.confirmed_at)}` : ''}.`
+    : ''
+
+  const autoApprovedPaymentStatusNote = latestAutoApprovedIncomingPayoutTransfer
+    ? `System auto-approved this payout${latestAutoApprovedIncomingPayoutTransfer.confirmed_at ? ` at ${formatBangkokDateTime(latestAutoApprovedIncomingPayoutTransfer.confirmed_at)}` : ''} after timeout.`
+    : ''
 
   const settlementHelpContent = {
     totalExpense: {
@@ -1008,15 +1157,27 @@ export const EventDetailPage = () => {
         {!canViewProtectedDetails ? (
           <Card className="space-y-4">
             <p className="text-sm text-neutral-600">
-              {isEventPast
+              {isUpcomingEvent
+                ? 'This event has not started yet. Check-in is only available on event day.'
+                : !hasParticipantAccess
+                ? isToday
+                  ? isJoiningClosed
+                    ? 'Joining is locked for this event, so you can no longer join.'
+                    : 'You need to join this event before viewing event details.'
+                  : isEventPast
+                  ? 'You cannot view event details because you did not join this event.'
+                  : 'You need to join this event before viewing event details.'
+                : isEventPast
                 ? 'You did not check in for this event, so you cannot view this event details page.'
                 : 'You need to check in before opening this event details page.'}
             </p>
-            <p className="text-sm text-neutral-600">
-              {`Your amount stays at đ ${formatVndAmount(0)} if you do not check in for this event.`}
-            </p>
+            {hasParticipantAccess && !isUpcomingEvent && (
+              <p className="text-sm text-neutral-600">
+                {`Your amount stays at đ ${formatVndAmount(0)} if you do not check in for this event.`}
+              </p>
+            )}
             <div className="space-y-3 pt-1">
-              {isWithinCheckInWindow && (
+              {isToday && !isJoiningClosed && (
                 <Button onClick={handleCheckIn} loading={actionLoading} className="w-full">
                   <span className="inline-flex items-center gap-2">
                     <CheckCircle2 size={16} />
@@ -1024,8 +1185,8 @@ export const EventDetailPage = () => {
                   </span>
                 </Button>
               )}
-              <Button variant="secondary" onClick={() => navigate('/')} className="w-full">
-                Back to Home
+              <Button variant="secondary" onClick={() => navigate('/events')} className="w-full">
+                Back to Events
               </Button>
             </div>
           </Card>
@@ -1198,7 +1359,7 @@ export const EventDetailPage = () => {
                   <p className="text-2xl font-bold text-primary-400">
                     {`đ ${formatVndAmount(userApprovedExpenseTotal)}`}
                   </p>
-                  {!isCheckedIn && !isUpcomingEvent && (
+                  {!isCurrentUserActiveInSettlement && !isUpcomingEvent && (
                     <p className="text-xs text-neutral-600 mt-3">
                       {`You did not join this event, so your payment amount stays at đ ${formatVndAmount(0)}.`}
                     </p>
@@ -1263,6 +1424,12 @@ export const EventDetailPage = () => {
                     <p className={`mt-2 text-xs ${userPaymentStatus === 'waiting_confirm' ? 'text-warning-900' : 'text-neutral-600'}`}>
                       {paymentStatusHint}
                     </p>
+                    {manualMarkedPaymentStatusNote && (
+                      <p className="mt-1 text-xs text-primary-700">{manualMarkedPaymentStatusNote}</p>
+                    )}
+                    {autoApprovedPaymentStatusNote && (
+                      <p className="mt-1 text-xs text-primary-700">{autoApprovedPaymentStatusNote}</p>
+                    )}
                   </div>
                   {normalizedBalance < 0 && isCheckedIn && (
                     <Button
@@ -1283,9 +1450,12 @@ export const EventDetailPage = () => {
                   <p className="text-sm text-neutral-700">
                     {`Treasury marked transfer: đ ${formatVndAmount(waitingIncomingPayoutTransfer.amount)}. Confirm when received.`}
                   </p>
+                  {waitingIncomingAutoConfirmHint && (
+                    <p className="text-xs text-neutral-600">{waitingIncomingAutoConfirmHint}</p>
+                  )}
                   <div className="flex flex-col sm:flex-row gap-2">
                     <Button
-                      onClick={() => handleConfirmPaymentReceived(waitingIncomingPayoutTransfer.id)}
+                      onClick={() => handleConfirmPaymentReceived(waitingIncomingPayoutTransfer)}
                       variant="secondary"
                       className="w-full border border-warning-400 sm:w-auto"
                       loading={paymentActionId === `confirm-${waitingIncomingPayoutTransfer.id}`}
@@ -1368,14 +1538,23 @@ export const EventDetailPage = () => {
                               <button
                                 type="button"
                                 className="badge bg-success-50 text-success-700 transition hover:opacity-90 disabled:opacity-50"
-                                onClick={() => handleConfirmPaymentReceived(member.waitingTransfer.id)}
+                                onClick={() => handleConfirmPaymentReceived(member.waitingTransfer)}
                                 disabled={paymentActionId === `confirm-${member.waitingTransfer.id}` || Boolean(paymentActionId)}
                               >
                                 {paymentActionId === `confirm-${member.waitingTransfer.id}` ? '...' : 'Confirm Received'}
                               </button>
+                            ) : (isSettlementTransferEnabled && isTeamTreasurer ? (
+                              <button
+                                type="button"
+                                className="badge bg-primary-50 text-primary-700 transition hover:opacity-90 disabled:opacity-50"
+                                onClick={() => handleTreasurerMarkReceivedDirectly(member)}
+                                disabled={paymentActionId === `force-${member.user_id}` || Boolean(paymentActionId)}
+                              >
+                                {paymentActionId === `force-${member.user_id}` ? '...' : 'Mark Received'}
+                              </button>
                             ) : (
                               <Badge status="warning">Pending</Badge>
-                            )}
+                            ))}
                           </div>
                         </div>
                       )
@@ -1478,6 +1657,7 @@ export const EventDetailPage = () => {
                         <div key={`recv-${transfer.id}`} className="rounded-lg border border-neutral-200 p-2">
                           <p className="text-sm font-semibold">{transfer.from_user?.name || 'Unknown member'}</p>
                           <p className="text-xs text-neutral-600">{`Received by: ${transfer.to_user?.name || receiverName || 'Treasury'}`}</p>
+                          <p className="text-xs text-neutral-600">{`Marked by: ${transferConfirmedByLabel(transfer)} (${transferConfirmationMethodLabel(transfer)})`}</p>
                           <p className="text-xs text-neutral-600">{`Amount: đ ${formatVndAmount(transfer.amount)}`}</p>
                           <p className="text-xs text-neutral-500">{`Received at: ${transfer.confirmed_at ? formatBangkokDateTime(transfer.confirmed_at) : '-'}`}</p>
                         </div>
@@ -1493,6 +1673,11 @@ export const EventDetailPage = () => {
                         <div key={`sent-${transfer.id}`} className="rounded-lg border border-neutral-200 p-2">
                           <p className="text-sm font-semibold">{transfer.to_user?.name || 'Unknown member'}</p>
                           <p className="text-xs text-neutral-600">{`Sent by: ${transfer.from_user?.name || receiverName || 'Treasury'}`}</p>
+                          {String(transfer?.confirmation_method || '').toUpperCase() === 'AUTO_TIMEOUT' ? (
+                            <p className="text-xs text-neutral-600">Auto-approved after timeout</p>
+                          ) : (
+                            <p className="text-xs text-neutral-600">{`Confirmed by: ${transferConfirmedByLabel(transfer)} (${transferConfirmationMethodLabel(transfer)})`}</p>
+                          )}
                           <p className="text-xs text-neutral-600">{`Sent to: ${transfer.to_user?.name || 'Unknown member'}`}</p>
                           <p className="text-xs text-neutral-600">{`Amount: đ ${formatVndAmount(transfer.amount)}`}</p>
                           <p className="text-xs text-neutral-500">

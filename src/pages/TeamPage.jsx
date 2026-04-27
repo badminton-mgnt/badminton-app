@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Header, Card, Button, BottomNav, Modal, Input, Badge } from '../components'
 import { addTeamMember, deleteTeam, getAppUsers, getTeam, getTeamMembers, getUserProfile, leaveTeam, updateTeam, updateTeamTreasurer } from '../lib/api'
+import { isSettlementTransferFeatureGloballyEnabled } from '../lib/featureFlags'
 import { motion } from 'framer-motion'
 import { Edit2, UserPlus, Users } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
@@ -24,6 +25,8 @@ export const TeamPage = () => {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
   const [memberSearch, setMemberSearch] = useState('')
   const [teamName, setTeamName] = useState('')
+  const [settlementTransferFeatureEnabled, setSettlementTransferFeatureEnabled] = useState(false)
+  const [settlementAutoConfirmMinutes, setSettlementAutoConfirmMinutes] = useState('15')
   const [deleteReason, setDeleteReason] = useState('')
   const [addingUserId, setAddingUserId] = useState(null)
   const [currentUserRole, setCurrentUserRole] = useState('user')
@@ -46,6 +49,8 @@ export const TeamPage = () => {
       ])
       setTeam(teamData)
       setTeamName(teamData.name)
+      setSettlementTransferFeatureEnabled(Boolean(teamData.settlement_transfer_feature_enabled))
+      setSettlementAutoConfirmMinutes(String(teamData.settlement_auto_confirm_minutes || 15))
       setMembers(membersData)
       setAppUsers(usersData)
       setCurrentUserRole((profileData.role || 'user').toLowerCase())
@@ -57,6 +62,7 @@ export const TeamPage = () => {
   }
 
   const canManageTreasurer = ['admin', 'sub_admin'].includes(currentUserRole)
+  const canConfigureSettlementTransferFeature = currentUserRole === 'admin' && isSettlementTransferFeatureGloballyEnabled
   const hasTreasurer = Boolean(team?.treasurer_id)
   const treasurerMember = members.find((member) => String(member.user_id) === String(team?.treasurer_id))
   const teamCreatedSubtitle = team?.created_at ? `Created at ${formatBangkokDateTime(team.created_at)}` : undefined
@@ -140,9 +146,18 @@ export const TeamPage = () => {
   const handleUpdateTeam = async () => {
     try {
       setSavingTeam(true)
-      const updatedTeam = await updateTeam(teamId, teamName)
+      const updatedTeam = await updateTeam(teamId, teamName, {
+        settlement_transfer_feature_enabled: canConfigureSettlementTransferFeature
+          ? settlementTransferFeatureEnabled
+          : team?.settlement_transfer_feature_enabled,
+        settlement_auto_confirm_minutes: canConfigureSettlementTransferFeature
+          ? Number(settlementAutoConfirmMinutes || 15)
+          : team?.settlement_auto_confirm_minutes,
+      })
       setTeam(updatedTeam)
       setTeamName(updatedTeam.name)
+      setSettlementTransferFeatureEnabled(Boolean(updatedTeam.settlement_transfer_feature_enabled))
+      setSettlementAutoConfirmMinutes(String(updatedTeam.settlement_auto_confirm_minutes || 15))
       setEditModalOpen(false)
     } catch (error) {
       console.error('Error updating team:', error)
@@ -193,10 +208,22 @@ export const TeamPage = () => {
                 <div>
                   <p className="text-sm text-neutral-600">Admin Team Controls</p>
                   <p className="font-semibold">{team?.name}</p>
+                  {isSettlementTransferFeatureGloballyEnabled && (
+                    <p className="mt-1 text-xs text-neutral-600">
+                      {team?.settlement_transfer_feature_enabled
+                        ? `Settlement transfer feature: On (${team?.settlement_auto_confirm_minutes || 15} min timeout)`
+                        : 'Settlement transfer feature: Off'}
+                    </p>
+                  )}
                 </div>
                 <Button
                   variant="secondary"
-                  onClick={() => setEditModalOpen(true)}
+                  onClick={() => {
+                    setTeamName(team?.name || '')
+                    setSettlementTransferFeatureEnabled(Boolean(team?.settlement_transfer_feature_enabled))
+                    setSettlementAutoConfirmMinutes(String(team?.settlement_auto_confirm_minutes || 15))
+                    setEditModalOpen(true)
+                  }}
                 >
                   <span className="inline-flex items-center gap-2">
                     <Edit2 size={16} />
@@ -312,6 +339,8 @@ export const TeamPage = () => {
         onClose={() => {
           setEditModalOpen(false)
           setTeamName(team?.name || '')
+          setSettlementTransferFeatureEnabled(Boolean(team?.settlement_transfer_feature_enabled))
+          setSettlementAutoConfirmMinutes(String(team?.settlement_auto_confirm_minutes || 15))
         }}
         title="Edit Team"
         footer={
@@ -321,6 +350,8 @@ export const TeamPage = () => {
               onClick={() => {
                 setEditModalOpen(false)
                 setTeamName(team?.name || '')
+                setSettlementTransferFeatureEnabled(Boolean(team?.settlement_transfer_feature_enabled))
+                setSettlementAutoConfirmMinutes(String(team?.settlement_auto_confirm_minutes || 15))
               }}
               className="flex-1"
             >
@@ -330,7 +361,16 @@ export const TeamPage = () => {
               onClick={handleUpdateTeam}
               className="flex-1"
               loading={savingTeam}
-              disabled={!teamName.trim() || teamName.trim() === team?.name}
+              disabled={
+                !teamName.trim()
+                || (
+                  teamName.trim() === team?.name
+                  && (!canConfigureSettlementTransferFeature || (
+                    Boolean(settlementTransferFeatureEnabled) === Boolean(team?.settlement_transfer_feature_enabled)
+                    && Number(settlementAutoConfirmMinutes || 15) === Number(team?.settlement_auto_confirm_minutes || 15)
+                  ))
+                )
+              }
             >
               Save
             </Button>
@@ -345,6 +385,41 @@ export const TeamPage = () => {
             placeholder="Enter team name"
             maxLength={20}
           />
+          {isSettlementTransferFeatureGloballyEnabled ? (
+            <div className="space-y-3 rounded-xl border border-neutral-200 bg-neutral-50 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-neutral-800">Settlement Transfer Feature</p>
+                  <p className="text-xs text-neutral-600">
+                    Allow treasurer override confirm + auto-receive timeout for payouts.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className={`badge ${settlementTransferFeatureEnabled ? 'bg-success-50 text-success-700' : 'bg-neutral-200 text-neutral-700'}`}
+                  onClick={() => setSettlementTransferFeatureEnabled((prev) => !prev)}
+                >
+                  {settlementTransferFeatureEnabled ? 'Enabled' : 'Disabled'}
+                </button>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-neutral-700 mb-2">Auto-confirm timeout (minutes)</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={1440}
+                  value={settlementAutoConfirmMinutes}
+                  onChange={(e) => setSettlementAutoConfirmMinutes(e.target.value)}
+                  className="input-field"
+                  disabled={!settlementTransferFeatureEnabled}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-xs text-neutral-600">
+              Settlement transfer feature is disabled globally by deployment env flag.
+            </div>
+          )}
           <p className="text-xs text-neutral-600 text-right">
             {teamName.length}/20
           </p>
