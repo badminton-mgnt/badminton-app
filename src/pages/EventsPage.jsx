@@ -45,6 +45,8 @@ export const EventsPage = () => {
   const [pastEventsExpanded, setPastEventsExpanded] = useState(false)
   const [pendingCheckInEventIds, setPendingCheckInEventIds] = useState([])
   const [checkInActionId, setCheckInActionId] = useState(null)
+  const [deleteEventModalOpen, setDeleteEventModalOpen] = useState(false)
+  const [eventToDelete, setEventToDelete] = useState(null)
 
   useEffect(() => {
     if (!currentTeam) {
@@ -253,10 +255,19 @@ export const EventsPage = () => {
   const handleDeleteEvent = async (event, e) => {
     e.stopPropagation()
 
+    setEventToDelete(event)
+    setDeleteEventModalOpen(true)
+  }
+
+  const handleConfirmDeleteEvent = async () => {
+    if (!eventToDelete?.id) return
+
     try {
       setActionLoading(true)
-      await deleteEvent(event.id)
+      await deleteEvent(eventToDelete.id)
       loadEvents()
+      setDeleteEventModalOpen(false)
+      setEventToDelete(null)
     } catch (error) {
       console.error('Error deleting event:', error)
     } finally {
@@ -479,7 +490,6 @@ export const EventsPage = () => {
                                 variant="danger"
                                 className="flex-1"
                                 onClick={(e) => handleDeleteEvent(event, e)}
-                                loading={actionLoading}
                               >
                                 <span className="inline-flex items-center gap-2">
                                   <Trash2 size={14} />
@@ -658,7 +668,6 @@ export const EventsPage = () => {
                                 variant="danger"
                                 className="flex-1"
                                 onClick={(e) => handleDeleteEvent(event, e)}
-                                loading={actionLoading}
                               >
                                 <span className="inline-flex items-center gap-2">
                                   <Trash2 size={14} />
@@ -851,6 +860,42 @@ export const EventsPage = () => {
             placeholder="1"
           />
         </div>
+      </Modal>
+
+      <Modal
+        isOpen={deleteEventModalOpen}
+        onClose={() => {
+          setDeleteEventModalOpen(false)
+          setEventToDelete(null)
+        }}
+        title="Delete Event"
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setDeleteEventModalOpen(false)
+                setEventToDelete(null)
+              }}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              onClick={handleConfirmDeleteEvent}
+              className="flex-1"
+              loading={actionLoading}
+              disabled={!eventToDelete}
+            >
+              Delete
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-neutral-600">
+          {`Are you sure you want to delete "${eventToDelete?.title || 'this event'}"? This action cannot be undone.`}
+        </p>
       </Modal>
 
       <BottomNav />

@@ -413,6 +413,38 @@ export const revokeAppSignupSecret = async (secretId) => {
   return data
 }
 
+export const getNotificationsRetentionDays = async () => {
+  const { data, error } = await supabase
+    .from('app_runtime_configs')
+    .select('config_value')
+    .eq('config_key', 'notifications_retention_days')
+    .maybeSingle()
+
+  if (error) throw error
+
+  const parsedDays = Number.parseInt(String(data?.config_value ?? '10'), 10)
+  if (!Number.isFinite(parsedDays) || parsedDays < 1) {
+    return 10
+  }
+
+  return parsedDays
+}
+
+export const updateNotificationsRetentionDays = async (days) => {
+  const parsedDays = Number.parseInt(String(days ?? ''), 10)
+
+  if (!Number.isFinite(parsedDays) || parsedDays < 1 || parsedDays > 365) {
+    throw new Error('Retention days must be between 1 and 365')
+  }
+
+  const { error } = await supabase.rpc('set_notifications_retention_days', {
+    p_days: parsedDays,
+  })
+
+  if (error) throw error
+  return parsedDays
+}
+
 // Team functions
 export const createTeam = async (name, userId) => {
   if (!userId) {
