@@ -325,10 +325,22 @@ export const EventsPage = () => {
   const pendingSettlementPastEventsNoCheckIn = pendingSettlementPastEvents.filter(
     (event) => !pendingCheckInIdSet.has(String(event.id))
   )
+  const nowMs = Date.now()
   const completedPastEvents = [
     ...completedEvents,
     ...pastEvents.filter((event) => isCancelledEvent(event) || isPastBeyondAutoWindow(event)),
-  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+  ].sort((a, b) => {
+    const aTime = new Date(a.date).getTime()
+    const bTime = new Date(b.date).getTime()
+    const aDistance = Number.isFinite(aTime) ? Math.abs(nowMs - aTime) : Number.POSITIVE_INFINITY
+    const bDistance = Number.isFinite(bTime) ? Math.abs(nowMs - bTime) : Number.POSITIVE_INFINITY
+
+    if (aDistance !== bDistance) {
+      return aDistance - bDistance
+    }
+
+    return bTime - aTime
+  })
 
   if (teamsLoading || (loading && currentTeam && events.length === 0)) {
     return (

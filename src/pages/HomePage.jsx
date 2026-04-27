@@ -23,7 +23,7 @@ import {
 import { formatVndAmount } from '../lib/currency'
 import { formatBangkokDateTime, getBangkokDateKey } from '../lib/dateTime'
 import { motion } from 'framer-motion'
-import { LogOut, Plus, Users } from 'lucide-react'
+import { ChevronDown, ChevronUp, LogOut, Plus, Users } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { useTeam } from '../contexts/TeamContext'
 
@@ -51,6 +51,7 @@ export const HomePage = () => {
     label: 'No Team',
   })
   const [todayEvents, setTodayEvents] = useState([])
+  const [todayEventsExpanded, setTodayEventsExpanded] = useState(false)
   const [todayEventCheckedInMap, setTodayEventCheckedInMap] = useState({})
   const [pendingPastCheckInEvents, setPendingPastCheckInEvents] = useState([])
   const [pendingCheckInModalOpen, setPendingCheckInModalOpen] = useState(false)
@@ -101,6 +102,7 @@ export const HomePage = () => {
   useEffect(() => {
     if (!currentTeam) {
       setTodayEvents([])
+      setTodayEventsExpanded(false)
       setTodayEventCheckedInMap({})
       setPendingPastCheckInEvents([])
       setPendingCheckInModalOpen(false)
@@ -162,7 +164,7 @@ export const HomePage = () => {
       const now = Date.now()
       const todayMatches = activeEvents
         .filter((event) => getBangkokDateKey(event.date) === todayKey)
-        .sort((a, b) => new Date(a.date) - new Date(b.date))
+        .sort((a, b) => new Date(b.date) - new Date(a.date))
       const upcomingEvents = activeEvents.filter((event) => getBangkokDateKey(event.date) > todayKey)
       const pastEventsInGraceWindow = activeEvents.filter((event) => {
         if (!canCheckInEvent(event)) return false
@@ -178,6 +180,7 @@ export const HomePage = () => {
       })
 
       setTodayEvents(todayMatches)
+      setTodayEventsExpanded(todayMatches.length <= 1)
       setUpcomingCount(upcomingEvents.length)
       setHasUpcoming(upcomingEvents.length > 0)
       setTodayEventCheckedInMap(
@@ -667,43 +670,65 @@ export const HomePage = () => {
               <p className="text-neutral-600">Select a team to view its events.</p>
             </Card>
           ) : todayEvents.length > 0 ? (
-            <div className="space-y-3">
-              {todayEvents.map((todayEvent) => {
-                const todayEventCanCheckIn = canCheckInEvent(todayEvent)
-                const todayEventCheckedIn = Boolean(todayEventCheckedInMap[String(todayEvent.id)])
+            <Card className="space-y-3">
+              {todayEvents.length > 1 ? (
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between gap-3"
+                  onClick={() => setTodayEventsExpanded((prev) => !prev)}
+                >
+                  <div className="text-left">
+                    <p className="text-sm font-semibold text-neutral-700">Today&apos;s Team Events</p>
+                    <p className="text-xs text-neutral-500">{`${todayEvents.length} events today`}</p>
+                  </div>
+                  <span className="text-neutral-500">
+                    {todayEventsExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                  </span>
+                </button>
+              ) : (
+                <p className="text-sm font-semibold text-neutral-700">Today&apos;s Team Events</p>
+              )}
 
-                return (
-                  <Card
-                    key={todayEvent.id}
-                    onClick={() => handleEventCheckInClick(todayEvent, todayEventCheckedIn)}
-                    className="cursor-pointer hover:shadow-lg transition"
-                  >
-                    <div className="flex items-start justify-between mb-3">
-                      <div>
-                        <h3 className="font-semibold text-lg">{todayEvent.title}</h3>
-                        <p className="text-sm text-neutral-600">
-                          {todayEvent.location || 'Location not set'}
-                          {todayEvent.court_number ? ` - Court ${todayEvent.court_number}` : ''}
+              {(todayEvents.length === 1 || todayEventsExpanded) && (
+                <div className={`space-y-3 ${todayEvents.length > 1 ? 'border-t border-neutral-200 pt-3' : ''}`}>
+                  {todayEvents.map((todayEvent) => {
+                    const todayEventCanCheckIn = canCheckInEvent(todayEvent)
+                    const todayEventCheckedIn = Boolean(todayEventCheckedInMap[String(todayEvent.id)])
+
+                    return (
+                      <Card
+                        key={todayEvent.id}
+                        onClick={() => handleEventCheckInClick(todayEvent, todayEventCheckedIn)}
+                        className="cursor-pointer hover:shadow-lg transition"
+                      >
+                        <div className="flex items-start justify-between mb-3">
+                          <div>
+                            <h3 className="font-semibold text-lg">{todayEvent.title}</h3>
+                            <p className="text-sm text-neutral-600">
+                              {todayEvent.location || 'Location not set'}
+                              {todayEvent.court_number ? ` - Court ${todayEvent.court_number}` : ''}
+                            </p>
+                          </div>
+                          <Badge status={todayEventCanCheckIn ? (todayEventCheckedIn ? 'success' : 'warning') : 'default'}>
+                            {todayEventCanCheckIn
+                              ? (todayEventCheckedIn ? 'Checked In' : 'Check In')
+                              : String(todayEvent.status || '').toUpperCase() === 'COMPLETED'
+                              ? 'Completed'
+                              : 'Joining Closed'}
+                          </Badge>
+                        </div>
+                        <p className="text-sm text-neutral-600">{formatBangkokDateTime(todayEvent.date)}</p>
+                        <p className="text-xs text-neutral-500 mt-2">
+                          {todayEventCanCheckIn
+                            ? (todayEventCheckedIn ? 'Tap to view event details.' : 'Tap to confirm check-in and open this event.')
+                            : 'Tap to view event details.'}
                         </p>
-                      </div>
-                      <Badge status={todayEventCanCheckIn ? (todayEventCheckedIn ? 'success' : 'warning') : 'default'}>
-                        {todayEventCanCheckIn
-                          ? (todayEventCheckedIn ? 'Checked In' : 'Check In')
-                          : String(todayEvent.status || '').toUpperCase() === 'COMPLETED'
-                          ? 'Completed'
-                          : 'Joining Closed'}
-                      </Badge>
-                    </div>
-                    <p className="text-sm text-neutral-600">{formatBangkokDateTime(todayEvent.date)}</p>
-                    <p className="text-xs text-neutral-500 mt-2">
-                      {todayEventCanCheckIn
-                        ? (todayEventCheckedIn ? 'Tap to view event details.' : 'Tap to confirm check-in and open this event.')
-                        : 'Tap to view event details.'}
-                    </p>
-                  </Card>
-                )
-              })}
-            </div>
+                      </Card>
+                    )
+                  })}
+                </div>
+              )}
+            </Card>
           ) : (
             <Card
               onClick={() => navigate('/events', { state: { openCreateEvent: !hasUpcoming } })}

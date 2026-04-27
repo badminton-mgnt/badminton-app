@@ -29,6 +29,8 @@ CREATE TABLE teams (
   name TEXT NOT NULL CHECK (char_length(trim(name)) between 1 and 20),
   created_by UUID REFERENCES users(id) ON DELETE CASCADE,
   treasurer_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  settlement_transfer_feature_enabled BOOLEAN NOT NULL DEFAULT false,
+  settlement_auto_confirm_minutes INTEGER NOT NULL DEFAULT 15,
   created_at TIMESTAMP DEFAULT now()
 );
 
@@ -138,6 +140,8 @@ CREATE TABLE payment_transfers (
   amount NUMERIC(10, 2) NOT NULL,
   direction TEXT NOT NULL CHECK (direction IN ('TO_TREASURY', 'FROM_TREASURY')),
   status TEXT DEFAULT 'WAITING_CONFIRM' CHECK (status IN ('WAITING_CONFIRM', 'CONFIRMED', 'REJECTED')),
+  confirmed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  confirmation_method TEXT NOT NULL DEFAULT 'RECEIVER_MANUAL' CHECK (confirmation_method IN ('RECEIVER_MANUAL', 'TREASURER_MANUAL', 'AUTO_TIMEOUT')),
   confirmed_at TIMESTAMP,
   created_at TIMESTAMP DEFAULT now()
 );
@@ -197,6 +201,10 @@ alter table public.notifications enable row level security;
 alter table public.event_participants add column if not exists checked_in_by uuid references public.users(id) on delete set null;
 alter table public.events add column if not exists expenses_closed_at timestamp;
 alter table public.events add column if not exists expenses_closed_by uuid references public.users(id) on delete set null;
+alter table public.teams add column if not exists settlement_transfer_feature_enabled boolean not null default false;
+alter table public.teams add column if not exists settlement_auto_confirm_minutes integer not null default 15;
+alter table public.payment_transfers add column if not exists confirmed_by uuid references public.users(id) on delete set null;
+alter table public.payment_transfers add column if not exists confirmation_method text not null default 'RECEIVER_MANUAL';
 
 
 -- =====================================================
@@ -709,11 +717,35 @@ on public.payment_transfers
 for insert
 to authenticated
 with check (
-  from_user_id = auth.uid()
-  and exists (
-    select 1 from public.team_members tm
-    where tm.team_id = payment_transfers.team_id
-    and tm.user_id = auth.uid()
+  (
+    from_user_id = auth.uid()
+    and exists (
+      select 1 from public.team_members tm
+      where tm.team_id = payment_transfers.team_id
+      and tm.user_id = auth.uid()
+    )
+  )
+  or (
+    direction = 'TO_TREASURY'
+    and status = 'CONFIRMED'
+    and to_user_id = auth.uid()
+    and exists (
+      select 1
+      from public.teams t
+      where t.id = payment_transfers.team_id
+        and t.treasurer_id = auth.uid()
+        and coalesce(t.settlement_transfer_feature_enabled, false) = true
+    )
+    and exists (
+      select 1 from public.team_members tm_actor
+      where tm_actor.team_id = payment_transfers.team_id
+        and tm_actor.user_id = auth.uid()
+    )
+    and exists (
+      select 1 from public.team_members tm_target
+      where tm_target.team_id = payment_transfers.team_id
+        and tm_target.user_id = payment_transfers.from_user_id
+    )
   )
 );
 
@@ -736,9 +768,25 @@ create or replace function public.restrict_payment_transfer_confirmation_update(
 returns trigger
 language plpgsql
 as $$
+declare
+  v_team_treasurer_id uuid;
+  v_team_feature_enabled boolean;
+  v_auto_confirm_minutes integer;
 begin
   if auth.uid() is null then
     raise exception 'Authentication required';
+  end if;
+
+  select
+    t.treasurer_id,
+    coalesce(t.settlement_transfer_feature_enabled, false),
+    greatest(coalesce(t.settlement_auto_confirm_minutes, 15), 1)
+  into v_team_treasurer_id, v_team_feature_enabled, v_auto_confirm_minutes
+  from public.teams t
+  where t.id = old.team_id;
+
+  if not found then
+    raise exception 'Transfer team is missing';
   end if;
 
   if new.id <> old.id
@@ -756,11 +804,9 @@ begin
     end if;
 
     new.confirmed_at := coalesce(new.confirmed_at, old.confirmed_at, now());
+    new.confirmed_by := coalesce(new.confirmed_by, old.confirmed_by, auth.uid());
+    new.confirmation_method := 'TREASURER_MANUAL';
     return new;
-  end if;
-
-  if old.to_user_id <> auth.uid() then
-    raise exception 'Only receiver can confirm transfer';
   end if;
 
   if new.amount <> old.amount
@@ -776,15 +822,84 @@ begin
     raise exception 'Transfer already finalized';
   end if;
 
-  if new.status = 'CONFIRMED' then
-    new.confirmed_at := coalesce(new.confirmed_at, now());
-  else
+  if old.to_user_id <> auth.uid() then
+    raise exception 'Only receiver can confirm transfer';
+  end if;
+
+  if new.status = 'REJECTED' then
     new.confirmed_at := null;
+    new.confirmed_by := null;
+    new.confirmation_method := 'RECEIVER_MANUAL';
+    return new;
+  end if;
+
+  if coalesce(new.confirmation_method, '') = 'AUTO_TIMEOUT' then
+    if not v_team_feature_enabled then
+      raise exception 'Auto-timeout confirmation is disabled for this team';
+    end if;
+
+    if old.direction <> 'FROM_TREASURY' then
+      raise exception 'Auto-timeout confirmation is only valid for treasury payouts';
+    end if;
+
+    if now() < old.created_at + make_interval(mins => v_auto_confirm_minutes) then
+      raise exception 'Auto-timeout confirmation window is not reached yet';
+    end if;
+
+    new.confirmed_by := coalesce(new.confirmed_by, old.to_user_id);
+  else
+    if old.direction = 'TO_TREASURY' and old.to_user_id = v_team_treasurer_id then
+      new.confirmation_method := 'TREASURER_MANUAL';
+    else
+      new.confirmation_method := 'RECEIVER_MANUAL';
+    end if;
+
+    new.confirmed_by := coalesce(new.confirmed_by, auth.uid());
+  end if;
+
+  new.confirmed_at := coalesce(new.confirmed_at, now());
+
+  return new;
+end;
+$$;
+
+create or replace function public.guard_team_settlement_feature_update()
+returns trigger
+language plpgsql
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'Authentication required';
+  end if;
+
+  if
+    new.settlement_transfer_feature_enabled is distinct from old.settlement_transfer_feature_enabled
+    or new.settlement_auto_confirm_minutes is distinct from old.settlement_auto_confirm_minutes
+  then
+    if not exists (
+      select 1
+      from public.users u
+      where u.id = auth.uid()
+        and lower(coalesce(u.role, '')) = 'admin'
+    ) then
+      raise exception 'Only admin can configure settlement transfer feature';
+    end if;
+  end if;
+
+  if coalesce(new.settlement_auto_confirm_minutes, 15) < 1
+    or coalesce(new.settlement_auto_confirm_minutes, 15) > 1440 then
+    raise exception 'settlement_auto_confirm_minutes must be between 1 and 1440';
   end if;
 
   return new;
 end;
 $$;
+
+drop trigger if exists trg_guard_team_settlement_feature_update on public.teams;
+create trigger trg_guard_team_settlement_feature_update
+before update on public.teams
+for each row
+execute function public.guard_team_settlement_feature_update();
 
 drop trigger if exists trg_restrict_payment_transfer_confirmation_update on public.payment_transfers;
 
@@ -1192,6 +1307,10 @@ set search_path = public
 as $$
 declare
   v_actor_name text;
+  v_event_title text;
+  v_team_feature_enabled boolean;
+  v_auto_confirm_minutes integer;
+  v_message text;
 begin
   if new.to_user_id is null or new.to_user_id = new.from_user_id then
     return new;
@@ -1201,16 +1320,70 @@ begin
   from public.users u
   where u.id = new.from_user_id;
 
+  if (
+    new.status = 'CONFIRMED'
+    and upper(coalesce(new.direction, '')) = 'TO_TREASURY'
+    and upper(coalesce(new.confirmation_method, '')) = 'TREASURER_MANUAL'
+    and new.confirmed_by is not null
+    and new.confirmed_by = new.to_user_id
+  ) then
+    select e.title into v_event_title
+    from public.events e
+    where e.id = new.event_id;
+
+    perform public.create_notification(
+      new.from_user_id,
+      new.to_user_id,
+      'PAYMENT_MARKED_RECEIVED_BY_TREASURER',
+      'Treasurer marked your payment as received',
+      format(
+        '%s marked your payment đ %s as received for event "%s".',
+        coalesce((select u.name from public.users u where u.id = new.to_user_id), 'Treasurer'),
+        to_char(round(coalesce(new.amount, 0))::numeric, 'FM999,999,999,990'),
+        coalesce(v_event_title, 'an event')
+      ),
+      '/event/' || new.event_id::text,
+      jsonb_build_object(
+        'transfer_id', new.id,
+        'event_id', new.event_id,
+        'team_id', new.team_id,
+        'status', new.status,
+        'confirmation_method', new.confirmation_method
+      )
+    );
+
+    return new;
+  end if;
+
+  v_message := format(
+    '%s transferred đ %s to you. Tap to view and confirm receipt.',
+    coalesce(v_actor_name, 'A teammate'),
+    to_char(round(coalesce(new.amount, 0))::numeric, 'FM999,999,999,990')
+  );
+
+  if upper(coalesce(new.direction, '')) = 'FROM_TREASURY' and new.status = 'WAITING_CONFIRM' then
+    select
+      coalesce(t.settlement_transfer_feature_enabled, false),
+      greatest(coalesce(t.settlement_auto_confirm_minutes, 15), 1)
+    into v_team_feature_enabled, v_auto_confirm_minutes
+    from public.teams t
+    where t.id = new.team_id;
+
+    if coalesce(v_team_feature_enabled, false) then
+      v_message := format(
+        '%s If you take no action, system will auto-approve after %s minute(s).',
+        v_message,
+        v_auto_confirm_minutes
+      );
+    end if;
+  end if;
+
   perform public.create_notification(
     new.to_user_id,
     new.from_user_id,
     'PAYMENT_RECEIVED',
     'You received a transfer',
-    format(
-      '%s transferred đ %s to you. Tap to view and confirm receipt.',
-      coalesce(v_actor_name, 'A teammate'),
-      to_char(round(coalesce(new.amount, 0))::numeric, 'FM999,999,999,990')
-    ),
+    v_message,
     '/event/' || new.event_id::text,
     jsonb_build_object('transfer_id', new.id, 'event_id', new.event_id, 'team_id', new.team_id)
   );
@@ -1819,6 +1992,20 @@ drop constraint if exists payment_transfers_status_check;
 alter table public.payment_transfers
 add constraint payment_transfers_status_check
 check (status in ('WAITING_CONFIRM', 'CONFIRMED', 'REJECTED'));
+
+alter table public.payment_transfers
+drop constraint if exists payment_transfers_confirmation_method_check;
+
+alter table public.payment_transfers
+add constraint payment_transfers_confirmation_method_check
+check (confirmation_method in ('RECEIVER_MANUAL', 'TREASURER_MANUAL', 'AUTO_TIMEOUT'));
+
+alter table public.teams
+drop constraint if exists teams_settlement_auto_confirm_minutes_check;
+
+alter table public.teams
+add constraint teams_settlement_auto_confirm_minutes_check
+check (settlement_auto_confirm_minutes between 1 and 1440);
 
 -- Create Indexes for better performance
 CREATE INDEX idx_team_members_user_id ON team_members(user_id);

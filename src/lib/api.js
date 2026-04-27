@@ -30,7 +30,7 @@ const attachTransferUsers = async (rows, fields = 'id, name') => {
   const userIds = [
     ...new Set(
       rows
-        .flatMap((row) => [row.from_user_id, row.to_user_id])
+        .flatMap((row) => [row.from_user_id, row.to_user_id, row.confirmed_by])
         .filter(Boolean)
     ),
   ]
@@ -48,6 +48,7 @@ const attachTransferUsers = async (rows, fields = 'id, name') => {
     ...row,
     from_user: usersById.get(String(row.from_user_id)) || null,
     to_user: usersById.get(String(row.to_user_id)) || null,
+    confirmed_by_user: usersById.get(String(row.confirmed_by)) || null,
   }))
 }
 
@@ -240,7 +241,7 @@ export const updateTeamTreasurer = async (teamId, treasurerId) => {
     .from('teams')
     .update({ treasurer_id: treasurerId || null })
     .eq('id', teamId)
-    .select('id, name, created_by, treasurer_id, created_at')
+    .select('id, name, created_by, treasurer_id, settlement_transfer_feature_enabled, settlement_auto_confirm_minutes, created_at')
     .single()
 
   if (error) throw error
@@ -453,7 +454,7 @@ export const createTeam = async (name, userId) => {
 export const getTeams = async (userId) => {
   const { data, error } = await supabase
     .from('team_members')
-    .select('id, team_id, joined_at, teams(id, name, created_by, treasurer_id, created_at)')
+    .select('id, team_id, joined_at, teams(id, name, created_by, treasurer_id, settlement_transfer_feature_enabled, settlement_auto_confirm_minutes, created_at)')
     .eq('user_id', userId)
 
   if (error) throw error
@@ -463,7 +464,7 @@ export const getTeams = async (userId) => {
 export const getAllTeams = async () => {
   const { data, error } = await supabase
     .from('teams')
-    .select('id, name, created_by, treasurer_id, created_at')
+    .select('id, name, created_by, treasurer_id, settlement_transfer_feature_enabled, settlement_auto_confirm_minutes, created_at')
     .order('created_at', { ascending: false })
 
   if (error) throw error
@@ -473,7 +474,7 @@ export const getAllTeams = async () => {
 export const getTeam = async (teamId) => {
   const { data, error } = await supabase
     .from('teams')
-    .select('id, name, created_by, treasurer_id, created_at')
+    .select('id, name, created_by, treasurer_id, settlement_transfer_feature_enabled, settlement_auto_confirm_minutes, created_at')
     .eq('id', teamId)
     .single()
 
@@ -481,7 +482,7 @@ export const getTeam = async (teamId) => {
   return data
 }
 
-export const updateTeam = async (teamId, name) => {
+export const updateTeam = async (teamId, name, options = {}) => {
   const trimmedName = name.trim()
 
   if (!trimmedName) {
@@ -492,9 +493,25 @@ export const updateTeam = async (teamId, name) => {
     throw new Error('Team name must be 20 characters or fewer.')
   }
 
+  const nextValues = {
+    name: trimmedName,
+  }
+
+  if (Object.prototype.hasOwnProperty.call(options, 'settlement_transfer_feature_enabled')) {
+    nextValues.settlement_transfer_feature_enabled = Boolean(options.settlement_transfer_feature_enabled)
+  }
+
+  if (Object.prototype.hasOwnProperty.call(options, 'settlement_auto_confirm_minutes')) {
+    const parsedMinutes = Number(options.settlement_auto_confirm_minutes)
+    if (!Number.isFinite(parsedMinutes) || parsedMinutes < 1 || parsedMinutes > 1440) {
+      throw new Error('Auto-confirm minutes must be between 1 and 1440.')
+    }
+    nextValues.settlement_auto_confirm_minutes = Math.round(parsedMinutes)
+  }
+
   const { data, error } = await supabase
     .from('teams')
-    .update({ name: trimmedName })
+    .update(nextValues)
     .eq('id', teamId)
     .select()
     .single()
@@ -805,10 +822,23 @@ export const updatePaymentTransfer = async (transferId, updates) => {
   return data[0]
 }
 
-export const confirmPaymentTransfer = async (transferId) => {
+export const confirmPaymentTransfer = async (transferId, options = {}) => {
+  const updates = {
+    status: 'CONFIRMED',
+    confirmed_at: options.confirmedAt || new Date().toISOString(),
+  }
+
+  if (options.confirmedBy) {
+    updates.confirmed_by = options.confirmedBy
+  }
+
+  if (options.confirmationMethod) {
+    updates.confirmation_method = options.confirmationMethod
+  }
+
   const { data, error } = await supabase
     .from('payment_transfers')
-    .update({ status: 'CONFIRMED', confirmed_at: new Date().toISOString() })
+    .update(updates)
     .eq('id', transferId)
     .select()
 
