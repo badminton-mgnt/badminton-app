@@ -1,65 +1,40 @@
-# Supabase Setup Guide
+# Supabase Setup
 
-## 1. Tạo Supabase Project
+## 1) Create Project
 
-1. Đi tới https://supabase.com
-2. Tạo account hoặc login
-3. Tạo project mới
-4. Copy `URL` và `ANON_KEY` vào `.env`
+1. Go to `https://supabase.com`
+2. Create a project
+3. Copy project URL + anon key
 
-## 2. Cấu hình Authentication
+## 2) Configure Env
 
-1. Vào **Authentication** → **Providers**
-2. Bật **Email** provider
-3. Cài đặt email templates nếu cần
+Add to project `.env`:
 
-## 3. Tạo Database Schema
-
-1. Vào **SQL Editor**
-2. Tạo query mới
-3. Copy toàn bộ nội dung từ `supabase/schema.sql`
-4. Chạy query
-5. Copy nội dung từ `supabase/triggers.sql`
-6. Chạy query
-
-## 4. Environment Variables
-
-Copy vào `.env`:
-
-```
-VITE_SUPABASE_URL=https://xxxxxxxxxxxx.supabase.co
-VITE_SUPABASE_ANON_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```env
+VITE_SUPABASE_URL=https://<project-ref>.supabase.co
+VITE_SUPABASE_ANON_KEY=<anon-key>
+VITE_ENABLE_SETTLEMENT_TRANSFER_FEATURE=true
 ```
 
-## 5. Chạy ứng dụng
+## 3) Apply SQL
 
-```bash
-npm install
-npm run dev
-```
+In Supabase SQL editor, run these files in order:
 
-Ứng dụng sẽ chạy tại http://localhost:5173
+1. `supabase/schema.sql`
+2. `supabase/triggers.sql`
 
-## ✅ Checklist
+## 4) Verify
 
-- [ ] Supabase project created
-- [ ] Email provider enabled
-- [ ] Database schema created
-- [ ] Triggers created
-- [ ] Environment variables set
-- [ ] App running locally
+- Auth can sign up / sign in
+- Teams/events load
+- RLS behaves correctly per role
+- Notifications and score history work
 
-## 🔐 RLS (Row Level Security)
+## 5) Runtime Config (Admin)
 
-Tất cả các tables đã có RLS enabled và policies cấu hình sẵn:
+`app_runtime_configs` is used for app-wide runtime settings.
+Current managed key in UI:
 
-- Users chỉ có thể xem/chỉnh sửa profile của họ
-- Team admins có thể quản lý members
-- Users chỉ có thể xem dữ liệu trong các team của họ
-- Admins/sub_admins có thể phê duyệt expenses
+- `notifications_retention_days`
 
-## 📝 Notes
-
-- Verify email là bắt buộc
-- Passwords require: 8+ chars, uppercase, lowercase, number, special char
-- Session tự động lưu trữ
+Admin can update this from `Manage -> App Settings`.

@@ -1,86 +1,35 @@
-# Hướng dẫn Deployment
+# Deployment
 
-## 1. Deploy Frontend trên GitHub Pages
+## Recommended Flow
 
-### Setup GitHub Pages
+1. Push code to `main`
+2. Build app with CI (`npm run build`)
+3. Deploy static `dist/` to your host (GitHub Pages / Vercel / Netlify)
 
-1. Push code lên GitHub
-2. Repository Settings → Pages
-3. Build and deployment → Source: GitHub Actions
+## Required Environment Variables
 
-### Tạo GitHub Actions Workflow
+Set these in your deployment platform:
 
-Tạo file `.github/workflows/deploy.yml`:
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+- `VITE_ENABLE_SETTLEMENT_TRANSFER_FEATURE`
 
-```yaml
-name: Deploy
-
-on:
-  push:
-    branches: [main]
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    
-    steps:
-      - uses: actions/checkout@v3
-      
-      - name: Install dependencies
-        run: npm install
-      
-      - name: Build
-        run: npm run build
-        env:
-          VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-      
-      - name: Deploy
-        uses: peaceiris/actions-gh-pages@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./dist
-```
-
-### Add Secrets
-
-1. Repository Settings → Secrets and variables → Actions
-2. Add:
-   - `SUPABASE_URL`
-   - `SUPABASE_ANON_KEY`
-
-## 2. Supabase Backend
-
-Supabase tự động host backend:
-
-- Database
-- Authentication
-- Storage (tùy chọn)
-- Real-time subscriptions
-
-Không cần additional deployment.
-
-## 3. Build & Test Locally
+## Local Production Check
 
 ```bash
 npm run build
 npm run preview
 ```
 
-## 4. Post-Deployment Checks
+## GitHub Actions Notes
 
-- [ ] Login/Signup working
-- [ ] Events load correctly
-- [ ] Payments calculate correctly
-- [ ] Animations smooth
-- [ ] Mobile responsive
-- [ ] Supabase connection stable
+Project already has workflow files under `.github/workflows`.
+Ensure deployment pipeline injects the variables above.
 
-## 5. Production Considerations
+## Post-Deploy Checklist
 
-- [ ] Setup custom domain (GitHub Pages)
-- [ ] Enable HTTPS
-- [ ] Setup error tracking (Sentry, etc.)
-- [ ] Monitor Supabase usage
-- [ ] Setup backup strategy
-- [ ] Configure CORS if needed
+- Login works
+- Event detail loads
+- Settlement flow works
+- Notifications page works
+- Scores can be created and shown in Event Detail
