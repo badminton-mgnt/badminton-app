@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Input, Button, Card } from '../components'
 import { getPasswordResetMode, resetPassword, resetPasswordWithAppSecret } from '../lib/api'
+import { isInternalAppSecretEmail } from '../lib/accountIdentity'
 import { motion } from 'framer-motion'
 import { ArrowLeft } from 'lucide-react'
 import { useLanguage } from '../contexts/LanguageContext'
@@ -59,19 +60,23 @@ export const ForgotPasswordPage = () => {
     }
 
     const modeData = await getPasswordResetMode(normalizedIdentifier)
-    const nextMode = String(modeData?.mode || '').toLowerCase()
+    const modeFromServer = String(modeData?.mode || '').toLowerCase()
+    const modeDataEmail = String(modeData?.email || '').toLowerCase()
+    const nextMode = modeFromServer === 'email' && isInternalAppSecretEmail(modeDataEmail)
+      ? 'app_secret'
+      : modeFromServer
 
     if (!['email', 'app_secret'].includes(nextMode)) {
       throw new Error(tx('Unable to detect account type.', 'Không thể xác định loại tài khoản.'))
     }
 
     setResetMode(nextMode)
-    setResolvedEmail(String(modeData?.email || ''))
+    setResolvedEmail(nextMode === 'app_secret' ? '' : String(modeData?.email || ''))
     setResolvedUsername(String(modeData?.username || normalizedIdentifier))
 
     return {
       mode: nextMode,
-      email: String(modeData?.email || ''),
+      email: nextMode === 'app_secret' ? '' : String(modeData?.email || ''),
       username: String(modeData?.username || normalizedIdentifier),
     }
   }
