@@ -24,6 +24,8 @@ export const ForgotPasswordPage = () => {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
   const [successMessage, setSuccessMessage] = useState('')
+  const isAppSecretPasswordValid = PASSWORD_REGEX.test(newPassword)
+  const isAppSecretPasswordMatching = newPassword === confirmPassword
 
   useEffect(() => {
     const normalizedIdentifier = String(identifier || '').trim()
@@ -231,6 +233,14 @@ export const ForgotPasswordPage = () => {
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   placeholder="••••••••"
+                  error={
+                    newPassword && !isAppSecretPasswordValid
+                      ? tx(
+                        'Password must include uppercase, lowercase, number, special character and be at least 8 characters.',
+                        'Mật khẩu phải có chữ hoa, chữ thường, số, ký tự đặc biệt và tối thiểu 8 ký tự.'
+                      )
+                      : ''
+                  }
                 />
                 <Input
                   label={tx('Confirm New Password', 'Xác nhận mật khẩu mới')}
@@ -239,7 +249,7 @@ export const ForgotPasswordPage = () => {
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   placeholder="••••••••"
                   error={
-                    confirmPassword && confirmPassword !== newPassword
+                    confirmPassword && !isAppSecretPasswordMatching
                       ? tx('Passwords do not match', 'Mật khẩu xác nhận không khớp')
                       : ''
                   }
@@ -258,7 +268,16 @@ export const ForgotPasswordPage = () => {
               disabled={
                 !identifier.trim()
                 || loading
-                || (resetMode === 'app_secret' && (!secretKey.trim() || !newPassword || !confirmPassword))
+                || (
+                  resetMode === 'app_secret'
+                  && (
+                    !secretKey.trim()
+                    || !newPassword
+                    || !confirmPassword
+                    || !isAppSecretPasswordValid
+                    || !isAppSecretPasswordMatching
+                  )
+                )
               }
               loading={loading}
               className="w-full"
