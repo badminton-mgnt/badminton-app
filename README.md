@@ -1,203 +1,58 @@
-# Badminton Attendance & Expense App
+# Badminton App
 
-Một ứng dụng web mobile-first để quản lý tham dự, chi phí và thanh toán cho các sự kiện cầu lông.
+Web app for managing badminton teams, events, check-ins, expenses, settlement, notifications, and score tracking.
 
-## 🎯 Tính năng
+## Tech Stack
 
-### Authentication
-- ✅ Đăng ký với email + mật khẩu
-- ✅ Xác thực email bắt buộc
-- ✅ Đăng nhập / Đăng xuất
-- ✅ Lưu trữ session
+- `React` + `Vite`
+- `Supabase` (Auth, Postgres, RLS)
+- `Framer Motion`
+- `Tailwind CSS`
 
-### Quản lý Sự kiện
-- ✅ Tạo/chỉnh sửa sự kiện
-- ✅ Danh sách sự kiện
-- ✅ Nêu bật sự kiện hôm nay
-- ✅ Kiểm tra sự kiện
+## Quick Start
 
-### Hệ thống Chi phí
-- ✅ Người dùng thêm chi phí
-- ✅ Admin phê duyệt/từ chối
-- ✅ Chỉ tính chi phí được phê duyệt
-- ✅ Trạng thái: PENDING, APPROVED, REJECTED
+1. Install dependencies
 
-### Thanh toán
-- ✅ Hiển thị mã QR
-- ✅ Thông tin ngân hàng
-- ✅ Xác nhận thanh toán
-- ✅ Tính toán nợ/công
-
-### Team (Nhóm)
-- ✅ Admin tạo team
-- ✅ Người dùng tham gia team
-- ✅ Quản lý thành viên
-- ✅ Gán role trong team
-
-## 🛠️ Tech Stack
-
-- **Frontend**: React 18 + Vite
-- **Styling**: Tailwind CSS
-- **Animation**: Framer Motion
-- **Backend**: Supabase
-- **Icons**: Lucide React
-
-## 🚀 Getting Started
-
-### Prerequisites
-- Node.js 16+
-- npm or yarn
-- Supabase account
-
-### Installation
-
-1. Clone repository
-```bash
-git clone <repo-url>
-cd badminton-app
-```
-
-2. Install dependencies
 ```bash
 npm install
 ```
 
-3. Setup environment
-```bash
-cp .env.example .env
+2. Create `.env` in project root
+
+```env
+VITE_SUPABASE_URL=your_supabase_project_url
+VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+VITE_ENABLE_SETTLEMENT_TRANSFER_FEATURE=true
 ```
 
-4. Add Supabase credentials to `.env`:
-```
-VITE_SUPABASE_URL=your-url
-VITE_SUPABASE_ANON_KEY=your-key
-```
+3. Run dev server
 
-5. Run development server
 ```bash
 npm run dev
 ```
 
-6. Open http://localhost:5173
+## Available Scripts
 
-## 📱 Mobile First Design
+- `npm run dev` - start development server
+- `npm run build` - build production bundle
+- `npm run preview` - preview production build locally
+- `npm run lint` - run ESLint
 
-- Optimized for phones (primary users)
-- Responsive layout
-- Touch-friendly UI
-- Bottom navigation
+## Database Setup
 
-## 🎨 Design System
+Run schema in Supabase SQL editor:
 
-### Colors
-- Primary Green: `#43A047`
-- Secondary Light: `#66BB6A`
-- Background: `#F9FAFB`
-- Status: Success, Warning, Error
+- `supabase/schema.sql`
+- `supabase/triggers.sql`
 
-### Components
-- Button (primary, secondary)
-- Card
-- Badge
-- Modal (bottom sheet)
-- Input
-- Bottom Navigation
-- Header
+See `SUPABASE_SETUP.md` for details.
 
-## 📊 Database Schema
+## Deployment
 
-```
-users
-  ├── id (uuid)
-  ├── name
-  └── created_at
+See `DEPLOYMENT.md`.
 
-teams
-  ├── id (uuid)
-  ├── name
-  ├── created_by
-  └── created_at
+## Other Docs
 
-team_members
-  ├── id (uuid)
-  ├── team_id
-  ├── user_id
-  ├── role (user/sub_admin/admin)
-  └── joined_at
-
-events
-  ├── id (uuid)
-  ├── team_id
-  ├── title
-  ├── date
-  ├── location
-  ├── court_number
-  ├── status (UPCOMING/ONGOING/COMPLETED/FINALIZED)
-  ├── created_by
-  └── created_at
-
-expenses
-  ├── id (uuid)
-  ├── team_id
-  ├── event_id
-  ├── user_id
-  ├── amount
-  ├── description
-  ├── status (PENDING/APPROVED/REJECTED)
-  └── created_at
-
-payments
-  ├── id (uuid)
-  ├── team_id
-  ├── event_id
-  ├── user_id
-  ├── amount
-  ├── status (PENDING/CONFIRMED)
-  └── created_at
-
-payment_info
-  ├── user_id
-  ├── bank_name
-  ├── account_number
-  ├── account_name
-  └── qr_url
-```
-
-## 🔐 Security
-
-- Supabase RLS (Row Level Security)
-- Users only modify own data
-- Admin assigns roles
-- Admin/sub_admin approve expenses
-
-## 📦 Build & Deploy
-
-### Build for production
-```bash
-npm run build
-```
-
-### Preview
-```bash
-npm run preview
-```
-
-## 🌐 Deployment
-
-- **Frontend**: GitHub Pages
-- **Backend**: Supabase
-
-## 📝 Notes
-
-- Password requirements: 8+ chars, uppercase, lowercase, number, special char
-- Real-time password validation
-- Smooth animations with Framer Motion
-- Clean, minimal UI design
-
-## 📞 Support
-
-For issues or questions, please open an issue on GitHub.
-
----
-
-Made with ❤️ for Badminton lovers
+- `QUICKSTART.md`
+- `SUPABASE_SETUP.md`
+- `DEPLOYMENT.md`

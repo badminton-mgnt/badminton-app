@@ -8,6 +8,7 @@ import {
   createExpense,
   getEventDetail,
   getEventExpenses,
+  getEventMatchScores,
   getEventPaymentTransfers,
   getEventParticipants,
   getTeam,
@@ -28,7 +29,7 @@ import { formatVndAmount } from '../lib/currency'
 import { formatBangkokDateTime, getBangkokDateKey, toDateTimeLocalValue, toSupabaseDateTime } from '../lib/dateTime'
 import { isSettlementTransferFeatureGloballyEnabled } from '../lib/featureFlags'
 import { motion } from 'framer-motion'
-import { CheckCircle2, QrCode } from 'lucide-react'
+import { CheckCircle2, Clock3, QrCode } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 
 const CHECKIN_PAYMENT_WINDOW_DAYS = 3
@@ -36,6 +37,25 @@ const DAY_IN_MS = 24 * 60 * 60 * 1000
 const TEXT_INPUT_MAX_LENGTH = 100
 const COURT_NUMBER_MAX_LENGTH = 2
 const NUMERIC_INPUT_MAX_LENGTH = 20
+
+const formatMatchDuration = (durationSeconds) => {
+  const totalSeconds = Math.max(0, Number(durationSeconds) || 0)
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return `${minutes}m ${String(seconds).padStart(2, '0')}s`
+}
+
+const getMatchTeamLabel = (playerOne, playerTwo, matchType = 'DOUBLES') => {
+  if (matchType === 'SINGLES') {
+    return playerOne || 'Unknown'
+  }
+
+  if (playerOne && playerTwo) {
+    return `${playerOne} & ${playerTwo}`
+  }
+
+  return playerOne || 'Unknown'
+}
 
 export const EventDetailPage = () => {
   const { eventId } = useParams()
@@ -47,6 +67,7 @@ export const EventDetailPage = () => {
   const [teamMembers, setTeamMembers] = useState([])
   const [teamMemberCount, setTeamMemberCount] = useState(0)
   const [expenses, setExpenses] = useState([])
+  const [matchScores, setMatchScores] = useState([])
   const [paymentTransfers, setPaymentTransfers] = useState([])
   const [loading, setLoading] = useState(true)
   const [paymentModalOpen, setPaymentModalOpen] = useState(false)
@@ -93,10 +114,11 @@ export const EventDetailPage = () => {
   const loadData = async () => {
     try {
       setLoadError('')
-      const [eventResult, participantsResult, expensesResult, transfersResult, profileResult] = await Promise.allSettled([
+      const [eventResult, participantsResult, expensesResult, matchScoresResult, transfersResult, profileResult] = await Promise.allSettled([
         getEventDetail(eventId),
         getEventParticipants(eventId),
         getEventExpenses(eventId),
+        getEventMatchScores(eventId),
         getEventPaymentTransfers(eventId),
         getUserProfile(user.id),
       ])
@@ -108,6 +130,7 @@ export const EventDetailPage = () => {
       const eventData = eventResult.value
       const participantsData = participantsResult.status === 'fulfilled' ? participantsResult.value : null
       const expensesData = expensesResult.status === 'fulfilled' ? expensesResult.value : null
+      const matchScoresData = matchScoresResult.status === 'fulfilled' ? matchScoresResult.value : null
       let transfersData = transfersResult.status === 'fulfilled' ? transfersResult.value : null
       const profileData = profileResult.status === 'fulfilled' ? profileResult.value : null
       let teamFeatureEnabled = false
@@ -206,6 +229,11 @@ export const EventDetailPage = () => {
       }
       if (expensesData) {
         setExpenses(expensesData)
+      }
+      if (matchScoresData) {
+        setMatchScores(matchScoresData)
+      } else {
+        setMatchScores([])
       }
       if (transfersData) {
         setPaymentTransfers(transfersData)
@@ -1196,10 +1224,10 @@ export const EventDetailPage = () => {
               <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500 px-2">
                 Sections
               </p>
-              <div className={`grid gap-2 ${(canAutoApproveExpense || canManageTreasury) ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'}`}>
+              <div className={`grid gap-2 ${(canAutoApproveExpense || canManageTreasury) ? 'grid-cols-2 sm:grid-cols-5' : 'grid-cols-2 sm:grid-cols-4'}`}>
                 <button
                   type="button"
-                  className={`rounded-lg border px-3 py-2.5 text-xs font-semibold transition ${
+                  className={`rounded-lg border px-2 sm:px-3 py-2.5 text-xs font-semibold transition truncate ${
                     activeTab === 'settlement'
                       ? 'border-primary-400 bg-primary-400 text-white shadow-sm'
                       : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50'
@@ -1210,7 +1238,7 @@ export const EventDetailPage = () => {
                 </button>
                 <button
                   type="button"
-                  className={`rounded-lg border px-3 py-2.5 text-xs font-semibold transition ${
+                  className={`rounded-lg border px-2 sm:px-3 py-2.5 text-xs font-semibold transition truncate ${
                     activeTab === 'participants'
                       ? 'border-primary-400 bg-primary-400 text-white shadow-sm'
                       : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50'
@@ -1221,7 +1249,7 @@ export const EventDetailPage = () => {
                 </button>
                 <button
                   type="button"
-                  className={`rounded-lg border px-3 py-2.5 text-xs font-semibold transition ${
+                  className={`rounded-lg border px-2 sm:px-3 py-2.5 text-xs font-semibold transition truncate ${
                     activeTab === 'expenses'
                       ? 'border-primary-400 bg-primary-400 text-white shadow-sm'
                       : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50'
@@ -1230,10 +1258,21 @@ export const EventDetailPage = () => {
                 >
                   {`Expenses`}
                 </button>
+                <button
+                  type="button"
+                  className={`rounded-lg border px-2 sm:px-3 py-2.5 text-xs font-semibold transition truncate ${
+                    activeTab === 'scores'
+                      ? 'border-primary-400 bg-primary-400 text-white shadow-sm'
+                      : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50'
+                  }`}
+                  onClick={() => handleSectionTabClick('scores')}
+                >
+                  Scores
+                </button>
                 {(canAutoApproveExpense || canManageTreasury) && (
                   <button
                     type="button"
-                    className={`rounded-lg border px-3 py-2.5 text-xs font-semibold transition ${
+                    className={`rounded-lg border px-2 sm:px-3 py-2.5 text-xs font-semibold transition truncate ${
                       activeTab === 'treasury'
                         ? 'border-primary-400 bg-primary-400 text-white shadow-sm'
                         : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50'
@@ -1777,6 +1816,53 @@ export const EventDetailPage = () => {
                   ))
                 )}
               </Card>
+              </motion.div>
+            )}
+
+            {activeTab === 'scores' && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-sm font-semibold text-neutral-600 uppercase">Scores</h2>
+                  <Badge status="default">{matchScores.length}</Badge>
+                </div>
+
+                {matchScores.length === 0 ? (
+                  <Card className="text-center py-8">
+                    <Clock3 size={28} className="mx-auto text-neutral-300 mb-2" />
+                    <p className="text-sm text-neutral-600">No matches saved for this event yet.</p>
+                  </Card>
+                ) : (
+                  <div className="space-y-2">
+                    {matchScores.map((match) => (
+                      <Card key={match.id} className="space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="text-xs text-neutral-600 uppercase">{match.match_type === 'DOUBLES' ? '2 vs 2' : '1 vs 1'}</p>
+                            <p className="text-sm font-semibold text-neutral-800">
+                              {getMatchTeamLabel(match.team_a_player_1_user?.name, match.team_a_player_2_user?.name, match.match_type)}
+                              {'  '}
+                              <span className="text-primary-500">{match.team_a_score}</span>
+                              {' - '}
+                              <span className="text-primary-500">{match.team_b_score}</span>
+                              {'  '}
+                              {getMatchTeamLabel(match.team_b_player_1_user?.name, match.team_b_player_2_user?.name, match.match_type)}
+                            </p>
+                          </div>
+                          <Badge status="warning">Saved</Badge>
+                        </div>
+
+                        <div className="text-xs text-neutral-600 space-y-1">
+                          <p>Start: {formatBangkokDateTime(match.started_at)}</p>
+                          <p>Duration: {formatMatchDuration(match.duration_seconds)}</p>
+                          <p>Saved by: {match.created_by_user?.name || 'Unknown'}</p>
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                )}
               </motion.div>
             )}
 
