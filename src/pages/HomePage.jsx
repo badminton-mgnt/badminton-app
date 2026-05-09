@@ -25,6 +25,7 @@ import { formatBangkokDateTime, getBangkokDateKey } from '../lib/dateTime'
 import { motion } from 'framer-motion'
 import { ChevronDown, ChevronUp, LogOut, Plus, Users } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
+import { useLanguage } from '../contexts/LanguageContext'
 import { useTeam } from '../contexts/TeamContext'
 
 const CHECKIN_PAYMENT_WINDOW_DAYS = 3
@@ -35,6 +36,7 @@ export const HomePage = () => {
   const navigate = useNavigate()
   const location = useLocation()
   const { user } = useAuth()
+  const { language, setLanguage, t } = useLanguage()
   const { teams, allTeams, currentTeam, loading: teamsLoading, refreshTeams, setCurrentTeam } = useTeam()
   const [availableTeams, setAvailableTeams] = useState([])
   const [loading, setLoading] = useState(true)
@@ -45,10 +47,10 @@ export const HomePage = () => {
   const [checkInLoading, setCheckInLoading] = useState(false)
   const [userName, setUserName] = useState('')
   const [paymentSummary, setPaymentSummary] = useState({
-    status: 'No team selected',
+    status: t('home.payment_status.pick_team'),
     amount: 0,
     tone: 'default',
-    label: 'No Team',
+    label: 'NO_TEAM',
   })
   const [todayEvents, setTodayEvents] = useState([])
   const [todayEventsExpanded, setTodayEventsExpanded] = useState(false)
@@ -62,14 +64,46 @@ export const HomePage = () => {
 
   const getPaymentBadgeClassName = () => {
     switch (paymentSummary.label) {
-      case 'Pending':
+      case 'PENDING':
         return 'bg-warning-50 text-warning-900'
-      case 'Credit':
+      case 'CREDIT':
         return 'bg-white text-success-800 border border-success-200'
-      case 'Settled':
+      case 'SETTLED':
         return 'bg-success-700 text-white border border-success-800'
       default:
         return 'bg-white/20 text-white border border-white/20'
+    }
+  }
+
+  const getPluralSuffix = (count) => {
+    if (language !== 'en') return ''
+    return Number(count) > 1 ? 's' : ''
+  }
+
+  const getPaymentSummaryLabel = () => {
+    switch (paymentSummary.label) {
+      case 'GET_STARTED':
+        return t('home.payment_label.get_started')
+      case 'SELECT_TEAM':
+        return t('home.payment_label.select_team')
+      case 'NO_EVENTS':
+        return t('home.payment_label.no_events')
+      case 'EXPENSE_OPEN':
+        return t('home.payment_label.expense_open')
+      case 'JOINING_OPEN':
+        return t('home.payment_label.joining_open')
+      case 'NO_TREASURER':
+        return t('home.payment_label.no_treasurer')
+      case 'SETTLED':
+        return t('home.payment_label.settled')
+      case 'PENDING':
+        return t('home.payment_label.pending')
+      case 'CREDIT':
+        return t('home.payment_label.credit')
+      case 'UNAVAILABLE':
+        return t('home.payment_label.unavailable')
+      default:
+        return t('home.payment_label.no_team')
     }
   }
 
@@ -110,16 +144,18 @@ export const HomePage = () => {
       setUpcomingCount(0)
       setHasUpcoming(false)
       setPaymentSummary({
-        status: teams.length === 0 ? 'Join or create a team to get started' : 'Pick a team to view balances',
+        status: teams.length === 0
+          ? t('home.payment_status.join_or_create')
+          : t('home.payment_status.pick_team'),
         amount: 0,
         tone: 'default',
-        label: teams.length === 0 ? 'Get Started' : 'Select Team',
+        label: teams.length === 0 ? 'GET_STARTED' : 'SELECT_TEAM',
       })
       return
     }
 
     loadTeamOverview()
-  }, [currentTeam?.team_id, teams.length, user?.id])
+  }, [currentTeam?.team_id, teams.length, user?.id, language])
 
   useEffect(() => {
     if (!location.state?.navRefreshAt || !user) return
@@ -297,10 +333,10 @@ export const HomePage = () => {
 
       if (activeEvents.length === 0) {
         setPaymentSummary({
-          status: `No events yet in ${currentTeam.teams.name}`,
+          status: t('home.payment_status.no_events_in_team', { team: currentTeam.teams.name }),
           amount: 0,
           tone: 'default',
-          label: 'No Events',
+          label: 'NO_EVENTS',
         })
         return
       }
@@ -325,21 +361,21 @@ export const HomePage = () => {
       if (!paymentEvent) {
         setPaymentSummary({
           status: waitingExpenseCloseEvent
-            ? `Waiting treasurer to close expense adding in ${currentTeam.teams.name}`
-            : `Waiting admin/treasurer to mark Joining Closed in ${currentTeam.teams.name}`,
+            ? t('home.payment_status.waiting_expense_close', { team: currentTeam.teams.name })
+            : t('home.payment_status.waiting_joining_close', { team: currentTeam.teams.name }),
           amount: 0,
           tone: 'default',
-          label: waitingExpenseCloseEvent ? 'Expense Open' : 'Joining Open',
+          label: waitingExpenseCloseEvent ? 'EXPENSE_OPEN' : 'JOINING_OPEN',
         })
         return
       }
 
       if (!teamTreasurerId) {
         setPaymentSummary({
-          status: `Set a treasurer for ${currentTeam.teams.name} to enable settlements`,
+          status: t('home.payment_status.set_treasurer', { team: currentTeam.teams.name }),
           amount: 0,
           tone: 'default',
-          label: 'No Treasurer',
+          label: 'NO_TREASURER',
         })
         return
       }
@@ -413,40 +449,40 @@ export const HomePage = () => {
 
         if (!userIsCheckedIn) {
           setPaymentSummary({
-            status: `No payment needed for ${currentTeam.teams.name}`,
+            status: t('home.payment_status.no_payment_needed', { team: currentTeam.teams.name }),
             amount: 0,
             tone: 'default',
-            label: 'Settled',
+            label: 'SETTLED',
           })
         } else if (normalizedBalance < 0) {
           setPaymentSummary({
-            status: `You owe in ${currentTeam.teams.name}`,
+            status: t('home.payment_status.you_owe', { team: currentTeam.teams.name }),
             amount: Math.abs(normalizedBalance),
             tone: 'warning',
-            label: 'Pending',
+            label: 'PENDING',
           })
         } else if (normalizedBalance > 0) {
           setPaymentSummary({
-            status: `${currentTeam.teams.name} owes you`,
+            status: t('home.payment_status.team_owes_you', { team: currentTeam.teams.name }),
             amount: normalizedBalance,
             tone: 'success',
-            label: 'Credit',
+            label: 'CREDIT',
           })
         } else {
           setPaymentSummary({
-            status: `All settled for ${currentTeam.teams.name}`,
+            status: t('home.payment_status.all_settled', { team: currentTeam.teams.name }),
             amount: 0,
             tone: 'success',
-            label: 'Settled',
+            label: 'SETTLED',
           })
         }
       } catch (error) {
         console.error('Error loading payment summary:', error)
         setPaymentSummary({
-          status: 'Unable to load team balance',
+          status: t('home.payment_status.unavailable'),
           amount: 0,
           tone: 'default',
-          label: 'Unavailable',
+          label: 'UNAVAILABLE',
         })
       }
     } catch (error) {
@@ -456,10 +492,10 @@ export const HomePage = () => {
       setUpcomingCount(0)
       setHasUpcoming(false)
       setPaymentSummary({
-        status: 'Unable to load team balance',
+        status: t('home.payment_status.unavailable'),
         amount: 0,
         tone: 'default',
-        label: 'Unavailable',
+        label: 'UNAVAILABLE',
       })
     }
   }
@@ -564,7 +600,7 @@ export const HomePage = () => {
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <div className="w-12 h-12 border-4 border-primary-400 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-neutral-600">Loading...</p>
+          <p className="text-neutral-600">{t('home.loading')}</p>
         </div>
       </div>
     )
@@ -577,7 +613,7 @@ export const HomePage = () => {
       className="pb-24"
     >
       <Header
-        title={`Hello, ${userName}!`}
+        title={t('home.hello', { name: userName })}
         subtitleContent={
           <button
             onClick={handleHeaderTeamClick}
@@ -587,17 +623,27 @@ export const HomePage = () => {
               status={currentTeam?.teams?.name ? 'success' : 'warning'}
               className="cursor-pointer bg-white/15 text-white border border-white/20"
             >
-              {currentTeam?.teams?.name || (allTeams.length > 0 ? 'No team yet, tap to join' : 'No team yet, tap to create')}
+              {currentTeam?.teams?.name || (allTeams.length > 0 ? t('home.no_team_join') : t('home.no_team_create'))}
             </Badge>
           </button>
         }
         action={
-          <button
-            onClick={handleLogout}
-            className="p-2 hover:bg-white hover:bg-opacity-20 rounded-lg transition"
-          >
-            <LogOut size={20} className="text-white" />
-          </button>
+          <div className="flex items-center gap-2">
+            <select
+              value={language}
+              onChange={(event) => setLanguage(event.target.value)}
+              className="h-9 rounded-lg border border-white/20 bg-white/10 px-2 text-xs font-semibold text-white outline-none"
+            >
+              <option value="en" className="text-neutral-800">EN</option>
+              <option value="vi" className="text-neutral-800">VI</option>
+            </select>
+            <button
+              onClick={handleLogout}
+              className="p-2 hover:bg-white hover:bg-opacity-20 rounded-lg transition"
+            >
+              <LogOut size={20} className="text-white" />
+            </button>
+          </div>
         }
       />
 
@@ -607,8 +653,8 @@ export const HomePage = () => {
             className="border border-warning-300 bg-warning-50 cursor-pointer"
             onClick={() => navigate('/me')}
           >
-            <p className="text-sm font-semibold text-warning-900">Add your payment info.</p>
-            <p className="text-xs text-warning-900 mt-1">Tap here to set up payment details in Me.</p>
+            <p className="text-sm font-semibold text-warning-900">{t('home.payment_setup_title')}</p>
+            <p className="text-xs text-warning-900 mt-1">{t('home.payment_setup_hint')}</p>
           </Card>
         )}
 
@@ -618,7 +664,7 @@ export const HomePage = () => {
           transition={{ delay: 0.1 }}
         >
           <h2 className="text-sm font-semibold text-neutral-600 mb-3 uppercase">
-            Payment Status
+            {t('home.payment_status')}
           </h2>
           <Card className={getPaymentCardClassName()}>
             <div className="flex justify-between items-start">
@@ -629,7 +675,7 @@ export const HomePage = () => {
                 </p>
               </div>
               <Badge status="default" className={getPaymentBadgeClassName()}>
-                {paymentSummary.label}
+                {getPaymentSummaryLabel()}
               </Badge>
             </div>
           </Card>
@@ -645,10 +691,13 @@ export const HomePage = () => {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-semibold uppercase text-warning-900">
-                    Check-in Warning
+                    {t('home.checkin_warning')}
                   </p>
                   <p className="text-sm text-warning-900">
-                    {`You have ${pendingPastCheckInEvents.length} event${pendingPastCheckInEvents.length > 1 ? 's' : ''} pending check-in.`}
+                    {t('home.pending_checkin', {
+                      count: pendingPastCheckInEvents.length,
+                      plural: getPluralSuffix(pendingPastCheckInEvents.length),
+                    })}
                   </p>
                 </div>
                 <Button
@@ -656,18 +705,18 @@ export const HomePage = () => {
                   className="border border-warning-300"
                   onClick={() => setPendingCheckInModalOpen(true)}
                 >
-                  Review
+                  {t('home.review')}
                 </Button>
               </div>
             </Card>
           )}
 
           <h2 className="text-sm font-semibold text-neutral-600 mb-3 uppercase">
-            Today&apos;s Team Event
+            {t('home.todays_team_event')}
           </h2>
           {!currentTeam ? (
             <Card>
-              <p className="text-neutral-600">Select a team to view its events.</p>
+              <p className="text-neutral-600">{t('home.select_team_events')}</p>
             </Card>
           ) : todayEvents.length > 0 ? (
             <Card className="space-y-3">
@@ -678,15 +727,15 @@ export const HomePage = () => {
                   onClick={() => setTodayEventsExpanded((prev) => !prev)}
                 >
                   <div className="text-left">
-                    <p className="text-sm font-semibold text-neutral-700">Today&apos;s Team Events</p>
-                    <p className="text-xs text-neutral-500">{`${todayEvents.length} events today`}</p>
+                    <p className="text-sm font-semibold text-neutral-700">{t('home.todays_team_events')}</p>
+                    <p className="text-xs text-neutral-500">{t('home.events_today', { count: todayEvents.length })}</p>
                   </div>
                   <span className="text-neutral-500">
                     {todayEventsExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
                   </span>
                 </button>
               ) : (
-                <p className="text-sm font-semibold text-neutral-700">Today&apos;s Team Events</p>
+                <p className="text-sm font-semibold text-neutral-700">{t('home.todays_team_events')}</p>
               )}
 
               {(todayEvents.length === 1 || todayEventsExpanded) && (
@@ -705,23 +754,23 @@ export const HomePage = () => {
                           <div>
                             <h3 className="font-semibold text-lg">{todayEvent.title}</h3>
                             <p className="text-sm text-neutral-600">
-                              {todayEvent.location || 'Location not set'}
-                              {todayEvent.court_number ? ` - Court ${todayEvent.court_number}` : ''}
+                              {todayEvent.location || t('home.location_not_set')}
+                              {todayEvent.court_number ? ` - ${t('home.court')} ${todayEvent.court_number}` : ''}
                             </p>
                           </div>
                           <Badge status={todayEventCanCheckIn ? (todayEventCheckedIn ? 'success' : 'warning') : 'default'}>
                             {todayEventCanCheckIn
-                              ? (todayEventCheckedIn ? 'Checked In' : 'Check In')
+                              ? (todayEventCheckedIn ? t('home.checked_in') : t('home.check_in'))
                               : String(todayEvent.status || '').toUpperCase() === 'COMPLETED'
-                              ? 'Completed'
-                              : 'Joining Closed'}
+                              ? t('home.completed')
+                              : t('home.joining_closed')}
                           </Badge>
                         </div>
                         <p className="text-sm text-neutral-600">{formatBangkokDateTime(todayEvent.date)}</p>
                         <p className="text-xs text-neutral-500 mt-2">
                           {todayEventCanCheckIn
-                            ? (todayEventCheckedIn ? 'Tap to view event details.' : 'Tap to confirm check-in and open this event.')
-                            : 'Tap to view event details.'}
+                            ? (todayEventCheckedIn ? t('home.tap_view_event') : t('home.tap_checkin_open_event'))
+                            : t('home.tap_view_event')}
                         </p>
                       </Card>
                     )
@@ -737,21 +786,23 @@ export const HomePage = () => {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h3 className="font-semibold text-lg">
-                    {hasUpcoming ? `${upcomingCount} upcoming event${upcomingCount > 1 ? 's' : ''}` : 'No event today'}
+                    {hasUpcoming
+                      ? t('home.upcoming_events', { count: upcomingCount, plural: getPluralSuffix(upcomingCount) })
+                      : t('home.no_event_today')}
                   </h3>
                   {hasUpcoming ? (
                     <div className="text-sm text-neutral-600">
-                      <p>No event today.</p>
-                      <p>Tap to see upcoming events.</p>
+                      <p>{t('home.no_event_today_hint')}</p>
+                      <p>{t('home.tap_see_upcoming')}</p>
                     </div>
                   ) : (
                     <p className="text-sm text-neutral-600">
-                      No upcoming events. Tap to create one.
+                      {t('home.no_upcoming_tap_create')}
                     </p>
                   )}
                 </div>
                 <Badge status={hasUpcoming ? 'warning' : 'default'}>
-                  {hasUpcoming ? 'Upcoming' : 'Create'}
+                  {hasUpcoming ? t('home.upcoming') : t('home.create')}
                 </Badge>
               </div>
             </Card>
@@ -765,20 +816,20 @@ export const HomePage = () => {
         >
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-neutral-600 uppercase">
-              Your Teams
+              {t('home.your_teams')}
             </h2>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setJoinModalOpen(true)}
                 className="p-2 hover:bg-neutral-200 rounded-lg transition"
-                title="Join a team"
+                title={t('home.join_team_title')}
               >
                 <Users size={20} className="text-primary-400" />
               </button>
               <button
                 onClick={() => navigate('/teams/create')}
                 className="p-2 hover:bg-neutral-200 rounded-lg transition"
-                title="Create a team"
+                title={t('home.create_team_title')}
               >
                 <Plus size={20} className="text-primary-400" />
               </button>
@@ -787,21 +838,21 @@ export const HomePage = () => {
           <div className="space-y-3">
             {teams.length === 0 ? (
               <Card className="text-center py-8">
-                <p className="text-neutral-600 mb-3">No teams yet</p>
+                <p className="text-neutral-600 mb-3">{t('home.no_teams_yet')}</p>
                 <div className="space-y-3">
                   <Button
                     onClick={() => setJoinModalOpen(true)}
                     variant="secondary"
                     className="w-full"
                   >
-                    Join Existing Team
+                    {t('home.join_existing_team')}
                   </Button>
                   <Button
                     onClick={() => navigate('/teams/create')}
                     variant="primary"
                     className="w-full"
                   >
-                    Create Team
+                    {t('home.create_team')}
                   </Button>
                 </div>
               </Card>
@@ -818,7 +869,7 @@ export const HomePage = () => {
                       <div>
                         <h3 className="font-semibold">{team.teams.name}</h3>
                         <p className="text-xs text-neutral-600">
-                          Joined {new Date(team.joined_at).toLocaleDateString()}
+                          {t('home.joined_on', { date: new Date(team.joined_at).toLocaleDateString() })}
                         </p>
                       </div>
                     </div>
@@ -836,7 +887,7 @@ export const HomePage = () => {
           setCheckInModalOpen(false)
           setSelectedCheckInEvent(null)
         }}
-        title="Confirm Check-In"
+        title={t('home.confirm_checkin')}
         footer={
           <>
             <Button
@@ -847,7 +898,7 @@ export const HomePage = () => {
               }}
               className="flex-1"
             >
-              Cancel
+              {t('home.cancel')}
             </Button>
             <Button
               variant="secondary"
@@ -855,14 +906,14 @@ export const HomePage = () => {
               className="flex-1"
               disabled={!selectedCheckInEvent || checkInLoading}
             >
-              I Didn&apos;t Join
+              {t('home.did_not_join')}
             </Button>
             <Button
               onClick={handleConfirmCheckIn}
               className="flex-1"
               loading={checkInLoading}
             >
-              Check In
+              {t('home.check_in')}
             </Button>
           </>
         }
@@ -870,21 +921,21 @@ export const HomePage = () => {
         <div className="space-y-3">
           <p className="text-sm text-neutral-700">
             {selectedCheckInEvent && hasDismissedCheckInEvent(user.id, selectedCheckInEvent.id)
-              ? 'You marked this event as not joined. You cannot open event details unless you check in now.'
-              : 'Check in to join this event and open its details.'}
+              ? t('home.checkin_not_joined_warning')
+              : t('home.checkin_join_hint')}
           </p>
           {selectedCheckInEvent && (
             <div className="rounded-2xl bg-neutral-50 p-4">
               <p className="font-semibold">{selectedCheckInEvent.title}</p>
               <p className="text-sm text-neutral-600 mt-1">{formatBangkokDateTime(selectedCheckInEvent.date)}</p>
               <p className="text-sm text-neutral-600">
-                {selectedCheckInEvent.location || 'Location not set'}
-                {selectedCheckInEvent.court_number ? ` - Court ${selectedCheckInEvent.court_number}` : ''}
+                {selectedCheckInEvent.location || t('home.location_not_set')}
+                {selectedCheckInEvent.court_number ? ` - ${t('home.court')} ${selectedCheckInEvent.court_number}` : ''}
               </p>
             </div>
           )}
           <p className="text-xs text-neutral-500">
-            Check in is allowed up to {CHECKIN_PAYMENT_WINDOW_DAYS} days after event date. If you do not check in, this event will not be included in your settlement.
+            {t('home.checkin_allowed_days', { days: CHECKIN_PAYMENT_WINDOW_DAYS })}
           </p>
         </div>
       </Modal>
@@ -892,19 +943,19 @@ export const HomePage = () => {
       <Modal
         isOpen={pendingCheckInModalOpen}
         onClose={() => setPendingCheckInModalOpen(false)}
-        title={`Pending Check-In (${pendingPastCheckInEvents.length})`}
+        title={t('home.pending_checkin_title', { count: pendingPastCheckInEvents.length })}
         footer={
           <Button
             variant="secondary"
             onClick={() => setPendingCheckInModalOpen(false)}
             className="w-full"
           >
-            Close
+            {t('home.close')}
           </Button>
         }
       >
         {pendingPastCheckInEvents.length === 0 ? (
-          <p className="text-sm text-neutral-600">No pending check-in events.</p>
+          <p className="text-sm text-neutral-600">{t('home.no_pending_checkin')}</p>
         ) : (
           <div className="space-y-3">
             {pendingPastCheckInEvents.map((event) => (
@@ -921,7 +972,7 @@ export const HomePage = () => {
                       onClick={() => handleDismissCheckIn(event)}
                       disabled={checkInLoading}
                     >
-                      I Didn&apos;t Join
+                      {t('home.did_not_join')}
                     </Button>
                     <Button
                       className="flex-1"
@@ -929,7 +980,7 @@ export const HomePage = () => {
                       loading={checkInLoading}
                       disabled={checkInLoading}
                     >
-                      Check In
+                      {t('home.check_in')}
                     </Button>
                   </div>
                 </div>
@@ -942,14 +993,14 @@ export const HomePage = () => {
       <Modal
         isOpen={switchTeamModalOpen}
         onClose={() => setSwitchTeamModalOpen(false)}
-        title="Select Team"
+        title={t('home.select_team')}
         footer={
           <Button
             variant="secondary"
             onClick={() => setSwitchTeamModalOpen(false)}
             className="w-full"
           >
-            Close
+            {t('home.close')}
           </Button>
         }
       >
@@ -969,12 +1020,12 @@ export const HomePage = () => {
                 <div>
                   <p className="font-semibold">{team.teams.name}</p>
                   <p className="text-xs text-neutral-600">
-                    Joined {new Date(team.joined_at).toLocaleDateString()}
+                    {t('home.joined_on', { date: new Date(team.joined_at).toLocaleDateString() })}
                   </p>
                 </div>
                 {currentTeam?.team_id === team.team_id && (
                   <span className="text-xs font-semibold uppercase text-primary-400">
-                    Current
+                    {t('home.current')}
                   </span>
                 )}
               </div>
@@ -986,24 +1037,24 @@ export const HomePage = () => {
       <Modal
         isOpen={joinModalOpen}
         onClose={() => setJoinModalOpen(false)}
-        title="Join Team"
+        title={t('home.join_team')}
         footer={
           <Button
             variant="secondary"
             onClick={() => setJoinModalOpen(false)}
             className="w-full"
           >
-            Close
+            {t('home.close')}
           </Button>
         }
       >
         {allTeams.length === 0 ? (
           <p className="text-sm text-neutral-600">
-            No teams have been created yet.
+            {t('home.no_teams_created')}
           </p>
         ) : availableTeams.length === 0 ? (
           <p className="text-sm text-neutral-600">
-            You already joined all available teams.
+            {t('home.joined_all_teams')}
           </p>
         ) : (
           <div className="space-y-3">
@@ -1012,14 +1063,14 @@ export const HomePage = () => {
                 <div>
                   <p className="font-semibold">{team.name}</p>
                   <p className="text-xs text-neutral-600">
-                    Created {new Date(team.created_at).toLocaleDateString()}
+                    {t('home.created_on', { date: new Date(team.created_at).toLocaleDateString() })}
                   </p>
                 </div>
                 <Button
                   onClick={() => handleJoinTeam(team.id)}
                   loading={joiningTeamId === team.id}
                 >
-                  Join
+                  {t('home.join')}
                 </Button>
               </Card>
             ))}

@@ -7,6 +7,7 @@ import { formatVietnamDate } from '../lib/dateTime'
 import { motion } from 'framer-motion'
 import { LogOut, Edit2 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
+import { useLanguage } from '../contexts/LanguageContext'
 
 const TEXT_INPUT_MAX_LENGTH = 100
 const NUMERIC_INPUT_MAX_LENGTH = 20
@@ -15,6 +16,8 @@ export const ProfilePage = () => {
   const navigate = useNavigate()
   const location = useLocation()
   const { user } = useAuth()
+  const { language, t } = useLanguage()
+  const tx = (en, vi) => (language === 'vi' ? vi : en)
   const [profile, setProfile] = useState(null)
   const [teams, setTeams] = useState([])
   const [paymentInfo, setPaymentInfoState] = useState(null)
@@ -86,7 +89,7 @@ export const ProfilePage = () => {
     }
 
     if (!file.type.startsWith('image/')) {
-      setQrUploadError('Please select an image file.')
+      setQrUploadError(tx('Please select an image file.', 'Vui lòng chọn một tệp hình ảnh.'))
       return
     }
 
@@ -95,7 +98,7 @@ export const ProfilePage = () => {
       setPaymentForm((prev) => ({ ...prev, qr_url: String(reader.result || '') }))
     }
     reader.onerror = () => {
-      setQrUploadError('Unable to read this image. Please try another file.')
+      setQrUploadError(tx('Unable to read this image. Please try another file.', 'Không thể đọc ảnh này. Vui lòng thử ảnh khác.'))
     }
     reader.readAsDataURL(file)
   }
@@ -123,7 +126,7 @@ export const ProfilePage = () => {
       animate={{ opacity: 1 }}
       className="pb-24"
     >
-      <Header title="Profile" action={
+      <Header title={t('profile.title')} action={
         <button
           onClick={handleLogout}
           className="p-2 hover:bg-white hover:bg-opacity-20 rounded-lg transition"
@@ -141,19 +144,19 @@ export const ProfilePage = () => {
           <Card>
             <div className="flex items-center justify-between mb-4">
               <div>
-                <p className="text-sm text-neutral-600">Name</p>
+                <p className="text-sm text-neutral-600">{tx('Name', 'Tên')}</p>
                 <p className="text-lg font-semibold">{profile?.name}</p>
               </div>
             </div>
             <div className="mb-4">
-              <p className="text-sm text-neutral-600">Role</p>
+              <p className="text-sm text-neutral-600">{tx('Role', 'Vai trò')}</p>
               <p className="text-lg font-semibold capitalize">
-                {profile?.role?.replace('_', ' ') || 'User'}
+                {profile?.role?.replace('_', ' ') || tx('User', 'Người dùng')}
               </p>
             </div>
             {visibleEmail ? (
               <div>
-                <p className="text-sm text-neutral-600">Email</p>
+                <p className="text-sm text-neutral-600">{tx('Email', 'Email')}</p>
                 <p className="text-lg font-semibold">{visibleEmail}</p>
               </div>
             ) : null}
@@ -168,7 +171,7 @@ export const ProfilePage = () => {
         >
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-neutral-600 uppercase">
-              Payment Information
+              {tx('Payment Information', 'Thông tin thanh toán')}
             </h2>
             <button
               onClick={() => setPaymentModalOpen(true)}
@@ -180,23 +183,23 @@ export const ProfilePage = () => {
           {paymentInfo ? (
             <Card className="space-y-3">
               <div>
-                <p className="text-xs text-neutral-600">Bank Name</p>
+                <p className="text-xs text-neutral-600">{tx('Bank Name', 'Tên ngân hàng')}</p>
                 <p className="font-semibold">{paymentInfo.bank_name}</p>
               </div>
               <div>
-                <p className="text-xs text-neutral-600">Account Name</p>
+                <p className="text-xs text-neutral-600">{tx('Account Name', 'Tên tài khoản')}</p>
                 <p className="font-semibold">{paymentInfo.account_name}</p>
               </div>
               <div>
-                <p className="text-xs text-neutral-600">Account Number</p>
+                <p className="text-xs text-neutral-600">{tx('Account Number', 'Số tài khoản')}</p>
                 <p className="font-mono text-sm font-semibold">{paymentInfo.account_number}</p>
               </div>
               {paymentInfo.qr_url && (
                 <div>
-                  <p className="text-xs text-neutral-600 mb-2">QR Code</p>
+                  <p className="text-xs text-neutral-600 mb-2">{tx('QR Code', 'Mã QR')}</p>
                   <img
                     src={paymentInfo.qr_url}
-                    alt="Payment QR"
+                    alt={tx('Payment QR', 'QR thanh toán')}
                     className="w-full max-w-56 rounded-lg border border-neutral-200"
                   />
                 </div>
@@ -204,13 +207,13 @@ export const ProfilePage = () => {
             </Card>
           ) : (
             <Card className="text-center py-8">
-              <p className="text-neutral-600 mb-3">No payment info set yet</p>
+              <p className="text-neutral-600 mb-3">{tx('No payment info set yet', 'Chưa có thông tin thanh toán')}</p>
               <Button
                 onClick={() => setPaymentModalOpen(true)}
                 variant="secondary"
                 className="w-full"
               >
-                Add Payment Info
+                {tx('Add Payment Info', 'Thêm thông tin thanh toán')}
               </Button>
             </Card>
           )}
@@ -223,7 +226,7 @@ export const ProfilePage = () => {
           transition={{ delay: 0.2 }}
         >
           <h2 className="text-sm font-semibold text-neutral-600 mb-3 uppercase">
-            Teams ({teams.length})
+            {tx('Teams', 'Các team')} ({teams.length})
           </h2>
           <div className="space-y-3">
             {teams.map((team) => (
@@ -236,7 +239,7 @@ export const ProfilePage = () => {
                   <div>
                     <p className="font-semibold">{team.teams.name}</p>
                     <p className="text-xs text-neutral-600">
-                      Joined {formatVietnamDate(team.joined_at, '-')}
+                      {tx('Joined', 'Tham gia')} {formatVietnamDate(team.joined_at, '-')}
                     </p>
                   </div>
                 </div>
@@ -251,7 +254,7 @@ export const ProfilePage = () => {
       <Modal
         isOpen={paymentModalOpen}
         onClose={() => setPaymentModalOpen(false)}
-        title="Payment Information"
+        title={tx('Payment Information', 'Thông tin thanh toán')}
         footer={
           <>
             <Button
@@ -259,34 +262,34 @@ export const ProfilePage = () => {
               onClick={() => setPaymentModalOpen(false)}
               className="flex-1"
             >
-              Cancel
+              {tx('Cancel', 'Hủy')}
             </Button>
             <Button
               onClick={handleSavePaymentInfo}
               className="flex-1"
             >
-              Save
+              {tx('Save', 'Lưu')}
             </Button>
           </>
         }
       >
         <div className="space-y-4">
           <Input
-            label="Bank Name"
+            label={tx('Bank Name', 'Tên ngân hàng')}
             value={paymentForm.bank_name}
             onChange={(e) => setPaymentForm(prev => ({ ...prev, bank_name: e.target.value.slice(0, TEXT_INPUT_MAX_LENGTH) }))}
             maxLength={TEXT_INPUT_MAX_LENGTH}
-            placeholder="e.g., HDFC Bank"
+            placeholder={tx('e.g., HDFC Bank', 'ví dụ: Vietcombank')}
           />
           <Input
-            label="Account Name"
+            label={tx('Account Name', 'Tên tài khoản')}
             value={paymentForm.account_name}
             onChange={(e) => setPaymentForm(prev => ({ ...prev, account_name: e.target.value.slice(0, TEXT_INPUT_MAX_LENGTH) }))}
             maxLength={TEXT_INPUT_MAX_LENGTH}
-            placeholder="Your name"
+            placeholder={tx('Your name', 'Tên của bạn')}
           />
           <Input
-            label="Account Number"
+            label={tx('Account Number', 'Số tài khoản')}
             value={paymentForm.account_number}
             onChange={(e) => setPaymentForm(prev => ({
               ...prev,
@@ -297,7 +300,7 @@ export const ProfilePage = () => {
           />
           <div>
             <label className="block text-sm font-medium text-neutral-700 mb-2">
-              Attach QR Image
+              {tx('Attach QR Image', 'Đính kèm ảnh QR')}
             </label>
             <input
               type="file"
@@ -311,7 +314,7 @@ export const ProfilePage = () => {
             {paymentForm.qr_url && (
               <img
                 src={paymentForm.qr_url}
-                alt="QR preview"
+                alt={tx('QR preview', 'Xem trước QR')}
                 className="mt-3 w-full max-w-56 rounded-lg border border-neutral-200"
               />
             )}

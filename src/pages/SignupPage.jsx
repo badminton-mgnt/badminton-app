@@ -4,12 +4,15 @@ import { Input, Button, Card } from '../components'
 import { isUsernameTaken, signupWithAppSecret, signupWithEmail } from '../lib/api'
 import { motion } from 'framer-motion'
 import { CheckCircle, Circle } from 'lucide-react'
+import { useLanguage } from '../contexts/LanguageContext'
 
 const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$/
 const USERNAME_REGEX = /^[a-z0-9._-]{3,30}$/
 
 export const SignupPage = () => {
   const navigate = useNavigate()
+  const { language, setLanguage } = useLanguage()
+  const tx = (en, vi) => (language === 'vi' ? vi : en)
   const usernameCheckRequestRef = useRef(0)
   const [signupMode, setSignupMode] = useState('email')
   const [formData, setFormData] = useState({
@@ -158,16 +161,22 @@ export const SignupPage = () => {
     try {
       if (isEmailMode) {
         await signupWithEmail(trimmedEmail, formData.password, trimmedName)
-        setVerificationMessage(`We've sent a verification link to ${trimmedEmail}`)
+        setVerificationMessage(tx(
+          `We've sent a verification link to ${trimmedEmail}`,
+          `Chúng tôi đã gửi link xác minh tới ${trimmedEmail}`
+        ))
       } else {
         const usernameTaken = await isUsernameTaken(normalizedUsername)
         if (usernameTaken) {
-          setError('Username is already taken. Please choose another one.')
+          setError(tx('Username is already taken. Please choose another one.', 'Tên người dùng đã tồn tại. Vui lòng chọn tên khác.'))
           return
         }
 
         await signupWithAppSecret(normalizedUsername, formData.password, trimmedName, trimmedAppSecret)
-        setVerificationMessage('Your account has been created with app secret. You can login now.')
+        setVerificationMessage(tx(
+          'Your account has been created with app secret. You can login now.',
+          'Tài khoản đã được tạo bằng app secret. Bạn có thể đăng nhập ngay.'
+        ))
       }
       setShowVerification(true)
     } catch (err) {
@@ -178,7 +187,7 @@ export const SignupPage = () => {
         normalizedMessage.includes('users_username_unique_idx') ||
         normalizedMessage.includes('duplicate key')
       ) {
-        setError('Username is already taken. Please choose another one.')
+        setError(tx('Username is already taken. Please choose another one.', 'Tên người dùng đã tồn tại. Vui lòng chọn tên khác.'))
       } else if (
         normalizedMessage.includes('invalid app secret') ||
         normalizedMessage.includes('app secret has expired') ||
@@ -187,11 +196,14 @@ export const SignupPage = () => {
         normalizedMessage.includes('database error saving new user') ||
         normalizedMessage.includes('unexpected_failure')
       ) {
-        setError('Invalid app secret. Please check with admin.')
+        setError(tx('Invalid app secret. Please check with admin.', 'App secret không hợp lệ. Vui lòng liên hệ admin.'))
       } else if (normalizedMessage.includes('app secret usage limit reached')) {
-        setError('This app secret already reached the usage limit. Ask admin for a new key.')
+        setError(tx(
+          'This app secret already reached the usage limit. Ask admin for a new key.',
+          'App secret này đã hết lượt sử dụng. Hãy xin admin key mới.'
+        ))
       } else {
-        setError(message || 'Unable to create account right now.')
+        setError(message || tx('Unable to create account right now.', 'Không thể tạo tài khoản lúc này.'))
       }
     } finally {
       setLoading(false)
@@ -214,17 +226,19 @@ export const SignupPage = () => {
           >
             <CheckCircle size={64} className="text-success-700 mx-auto" />
           </motion.div>
-          <h2 className="text-2xl font-bold mb-2">{isEmailMode ? 'Check your email' : 'Account created'}</h2>
+          <h2 className="text-2xl font-bold mb-2">
+            {isEmailMode ? tx('Check your email', 'Kiểm tra email của bạn') : tx('Account created', 'Đã tạo tài khoản')}
+          </h2>
           <p className="text-neutral-600 mb-6">
             {verificationMessage}
           </p>
           {isEmailMode ? (
             <p className="text-sm text-neutral-500 mb-6">
-              Please click the link to verify your email address
+              {tx('Please click the link to verify your email address', 'Vui lòng bấm vào link để xác minh địa chỉ email của bạn')}
             </p>
           ) : null}
           <Button onClick={() => navigate('/login')} className="w-full">
-            Go to Login
+            {tx('Go to Login', 'Đi đến đăng nhập')}
           </Button>
         </motion.div>
       </div>
@@ -235,8 +249,18 @@ export const SignupPage = () => {
     <div className="min-h-screen bg-neutral-100 py-8 px-4">
       <div className="container-mobile">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-primary-400 mb-2">Badminton App</h1>
-          <p className="text-neutral-600">Create your account</p>
+          <div className="mb-2 flex items-start justify-between gap-3">
+            <h1 className="text-3xl font-bold text-primary-400">Badminton App</h1>
+            <select
+              value={language}
+              onChange={(event) => setLanguage(event.target.value)}
+              className="h-9 rounded-lg border border-neutral-300 bg-white px-2 text-xs font-semibold text-neutral-700 outline-none"
+            >
+              <option value="en">EN</option>
+              <option value="vi">VI</option>
+            </select>
+          </div>
+          <p className="text-neutral-600">{tx('Create your account', 'Tạo tài khoản của bạn')}</p>
         </div>
 
         <Card className="mb-6">
@@ -249,7 +273,7 @@ export const SignupPage = () => {
                   isEmailMode ? 'bg-white text-primary-400 shadow-sm' : 'text-neutral-600 hover:text-neutral-800'
                 }`}
               >
-                Email Signup
+                {tx('Email Signup', 'Đăng ký bằng email')}
               </button>
               <button
                 type="button"
@@ -258,21 +282,21 @@ export const SignupPage = () => {
                   !isEmailMode ? 'bg-white text-primary-400 shadow-sm' : 'text-neutral-600 hover:text-neutral-800'
                 }`}
               >
-                App Secret Signup
+                {tx('App Secret Signup', 'Đăng ký bằng app secret')}
               </button>
             </div>
 
             <Input
-              label="Full Name"
+              label={tx('Full Name', 'Họ và tên')}
               name="name"
               value={formData.name}
               onChange={handleChange}
-              placeholder="Your name"
+              placeholder={tx('Your name', 'Tên của bạn')}
             />
 
             {isEmailMode ? (
               <Input
-                label="Email"
+                label={tx('Email', 'Email')}
                 type="email"
                 name="email"
                 value={formData.email}
@@ -282,7 +306,7 @@ export const SignupPage = () => {
             ) : (
               <>
                 <Input
-                  label="Username"
+                  label={tx('Username', 'Tên người dùng')}
                   name="username"
                   value={formData.username}
                   onChange={(e) => {
@@ -292,7 +316,10 @@ export const SignupPage = () => {
                   placeholder="your.username"
                   error={
                     formData.username && !isUsernameValid
-                      ? 'Use 3-30 chars: a-z, 0-9, dot, underscore, hyphen'
+                      ? tx(
+                        'Use 3-30 chars: a-z, 0-9, dot, underscore, hyphen',
+                        'Dùng 3-30 ký tự: a-z, 0-9, dấu chấm, gạch dưới, gạch ngang'
+                      )
                       : ''
                   }
                 />
@@ -300,14 +327,14 @@ export const SignupPage = () => {
                 {formData.username && isUsernameValid ? (
                   <div className="-mt-2">
                     {usernameCheckState === 'checking' ? (
-                      <p className="text-xs text-neutral-500">Checking username...</p>
+                      <p className="text-xs text-neutral-500">{tx('Checking username...', 'Đang kiểm tra tên người dùng...')}</p>
                     ) : null}
                     {usernameCheckState === 'available' ? (
-                      <p className="text-xs text-success-700">Username is available.</p>
+                      <p className="text-xs text-success-700">{tx('Username is available.', 'Tên người dùng khả dụng.')}</p>
                     ) : null}
                     {usernameCheckState === 'taken' ? (
                       <div className="space-y-2">
-                        <p className="text-xs text-error-800">Username is already taken.</p>
+                        <p className="text-xs text-error-800">{tx('Username is already taken.', 'Tên người dùng đã tồn tại.')}</p>
                         {usernameSuggestions.length ? (
                           <div className="flex flex-wrap gap-2">
                             {usernameSuggestions.map((suggestion) => (
@@ -325,29 +352,29 @@ export const SignupPage = () => {
                       </div>
                     ) : null}
                     {usernameCheckState === 'error' ? (
-                      <p className="text-xs text-neutral-500">Could not check username now. You can still submit.</p>
+                      <p className="text-xs text-neutral-500">{tx('Could not check username now. You can still submit.', 'Hiện không thể kiểm tra tên người dùng. Bạn vẫn có thể gửi biểu mẫu.')}</p>
                     ) : null}
                   </div>
                 ) : null}
 
                 <Input
-                  label="App Secret"
+                  label={tx('App Secret', 'App secret')}
                   type="password"
                   name="appSecret"
                   value={formData.appSecret}
                   onChange={handleChange}
-                  placeholder="Provided by admin"
+                  placeholder={tx('Provided by admin', 'Do admin cung cấp')}
                 />
 
                 <p className="text-xs text-neutral-500 -mt-2">
-                  Please contact the administrator to obtain the key.
+                  {tx('Please contact the administrator to obtain the key.', 'Vui lòng liên hệ quản trị viên để nhận key.')}
                 </p>
               </>
             )}
 
             <div>
               <Input
-                label="Password"
+                label={tx('Password', 'Mật khẩu')}
                 type="password"
                 name="password"
                 value={formData.password}
@@ -357,29 +384,29 @@ export const SignupPage = () => {
               <div className="mt-3 space-y-2">
                 <PasswordCheck
                   checked={passwordChecks.length}
-                  label="8+ characters"
+                  label={tx('8+ characters', 'Tối thiểu 8 ký tự')}
                 />
                 <PasswordCheck
                   checked={passwordChecks.uppercase}
-                  label="Uppercase letter"
+                  label={tx('Uppercase letter', 'Có chữ hoa')}
                 />
                 <PasswordCheck
                   checked={passwordChecks.lowercase}
-                  label="Lowercase letter"
+                  label={tx('Lowercase letter', 'Có chữ thường')}
                 />
                 <PasswordCheck
                   checked={passwordChecks.number}
-                  label="Number"
+                  label={tx('Number', 'Có số')}
                 />
                 <PasswordCheck
                   checked={passwordChecks.special}
-                  label="Special character"
+                  label={tx('Special character', 'Có ký tự đặc biệt')}
                 />
               </div>
             </div>
 
             <Input
-              label="Confirm Password"
+              label={tx('Confirm Password', 'Xác nhận mật khẩu')}
               type="password"
               name="confirmPassword"
               value={formData.confirmPassword}
@@ -387,7 +414,7 @@ export const SignupPage = () => {
               placeholder="••••••••"
               error={
                 formData.confirmPassword && !isPasswordMatching
-                  ? 'Passwords do not match'
+                  ? tx('Passwords do not match', 'Mật khẩu xác nhận không khớp')
                   : ''
               }
             />
@@ -404,18 +431,20 @@ export const SignupPage = () => {
               loading={loading}
               className="w-full"
             >
-              {isEmailMode ? 'Sign Up with Email' : 'Sign Up with App Secret'}
+              {isEmailMode
+                ? tx('Sign Up with Email', 'Đăng ký bằng email')
+                : tx('Sign Up with App Secret', 'Đăng ký bằng app secret')}
             </Button>
           </form>
         </Card>
 
         <p className="text-center text-sm text-neutral-600">
-          Already have an account?{' '}
+          {tx('Already have an account?', 'Đã có tài khoản?')}{' '}
           <button
             onClick={() => navigate('/login')}
             className="text-primary-400 font-semibold hover:underline"
           >
-            Login
+            {tx('Login', 'Đăng nhập')}
           </button>
         </p>
       </div>

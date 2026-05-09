@@ -17,6 +17,7 @@ import { formatVietnamDate, formatVietnamDateTime, toUnixTimestamp } from '../li
 import { motion } from 'framer-motion'
 import { Settings2 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
+import { useLanguage } from '../contexts/LanguageContext'
 
 const maskAppSecretKey = (secretKey) => {
   const key = String(secretKey || '')
@@ -28,6 +29,8 @@ const maskAppSecretKey = (secretKey) => {
 export const ManagePage = () => {
   const navigate = useNavigate()
   const { user } = useAuth()
+  const { language } = useLanguage()
+  const tx = (en, vi) => (language === 'vi' ? vi : en)
   const [profile, setProfile] = useState(null)
   const [teams, setTeams] = useState([])
   const [appUsers, setAppUsers] = useState([])
@@ -168,10 +171,10 @@ export const ManagePage = () => {
       setSecretError('')
       const createdSecret = await createAppSignupSecret({ maxUses: 10, expiresInHours: 1 })
       setAppSecrets((prev) => [createdSecret, ...prev])
-      setSecretFeedback('Key created')
+      setSecretFeedback(tx('Key created', 'Đã tạo key'))
     } catch (error) {
       console.error('Error generating app secret:', error)
-      setSecretError(error?.message || 'Unable to generate app secret key.')
+      setSecretError(error?.message || tx('Unable to generate app secret key.', 'Không thể tạo app secret key.'))
     } finally {
       setActionTargetId(null)
     }
@@ -207,7 +210,7 @@ export const ManagePage = () => {
       )))
     } catch (error) {
       console.error('Error revoking app secret:', error)
-      setSecretError(error?.message || 'Unable to revoke this key.')
+      setSecretError(error?.message || tx('Unable to revoke this key.', 'Không thể vô hiệu key này.'))
     } finally {
       setActionTargetId(null)
     }
@@ -216,11 +219,11 @@ export const ManagePage = () => {
   const handleCopySecret = async (secretKey) => {
     try {
       await navigator.clipboard.writeText(secretKey)
-      setSecretFeedback('Key copied')
+      setSecretFeedback(tx('Key copied', 'Đã sao chép key'))
       setSecretError('')
     } catch (error) {
       console.error('Error copying app secret:', error)
-      setSecretError('Unable to copy key to clipboard.')
+      setSecretError(tx('Unable to copy key to clipboard.', 'Không thể sao chép key vào clipboard.'))
     }
   }
 
@@ -232,10 +235,10 @@ export const ManagePage = () => {
 
       const savedDays = await updateNotificationsRetentionDays(notificationsRetentionDays)
       setNotificationsRetentionDays(String(savedDays))
-      setNotificationsRetentionFeedback('Saved')
+      setNotificationsRetentionFeedback(tx('Saved', 'Đã lưu'))
     } catch (error) {
       console.error('Error updating notifications retention days:', error)
-      setNotificationsRetentionError(error?.message || 'Unable to update notifications retention days.')
+      setNotificationsRetentionError(error?.message || tx('Unable to update notifications retention days.', 'Không thể cập nhật số ngày lưu thông báo.'))
     } finally {
       setActionTargetId(null)
     }
@@ -262,20 +265,20 @@ export const ManagePage = () => {
       animate={{ opacity: 1 }}
       className="pb-24"
     >
-      <Header title="Manage" subtitle={isAdmin ? 'Admin tools' : 'Access limited'} />
+      <Header title={tx('Manage', 'Quản lý')} subtitle={isAdmin ? tx('Admin tools', 'Công cụ quản trị') : tx('Access limited', 'Truy cập hạn chế')} />
 
       <div className="container-mobile py-6 space-y-6">
         {!isAdmin ? (
           <Card className="text-center py-8">
             <p className="text-neutral-600 mb-3">
-              Only admin users can access management tools.
+              {tx('Only admin users can access management tools.', 'Chỉ admin mới có quyền truy cập công cụ quản lý.')}
             </p>
             <Button
               variant="secondary"
               onClick={() => navigate('/')}
               className="w-full"
             >
-              Back Home
+              {tx('Back Home', 'Về Trang chủ')}
             </Button>
           </Card>
         ) : (
@@ -290,15 +293,15 @@ export const ManagePage = () => {
                     <Settings2 size={22} className="text-primary-400" />
                   </div>
                   <div>
-                    <p className="text-sm text-neutral-600">Management Area</p>
-                    <p className="font-semibold">Teams, users and app-secret admin tools</p>
+                    <p className="text-sm text-neutral-600">{tx('Management Area', 'Khu vực quản lý')}</p>
+                    <p className="font-semibold">{tx('Teams, users and app-secret admin tools', 'Quản lý team, người dùng và app secret')}</p>
                   </div>
                 </div>
               </Card>
 
               <Card className="p-2 space-y-2 mb-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500 px-2">
-                  Sections
+                  {tx('Sections', 'Danh mục')}
                 </p>
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   <button
@@ -310,7 +313,7 @@ export const ManagePage = () => {
                     }`}
                     onClick={() => setActiveTab('teams')}
                   >
-                    Teams
+                    {tx('Teams', 'Team')}
                   </button>
                   <button
                     type="button"
@@ -321,7 +324,7 @@ export const ManagePage = () => {
                     }`}
                     onClick={() => setActiveTab('users')}
                   >
-                    Users
+                    {tx('Users', 'Người dùng')}
                   </button>
                   <button
                     type="button"
@@ -332,7 +335,7 @@ export const ManagePage = () => {
                     }`}
                     onClick={() => setActiveTab('app-secrets')}
                   >
-                    App Secrets
+                    {tx('App Secrets', 'App Secret')}
                   </button>
                   <button
                     type="button"
@@ -343,7 +346,7 @@ export const ManagePage = () => {
                     }`}
                     onClick={() => setActiveTab('app-settings')}
                   >
-                    App Settings
+                    {tx('App Settings', 'Cài đặt app')}
                   </button>
                 </div>
               </Card>
@@ -351,12 +354,12 @@ export const ManagePage = () => {
               {activeTab === 'teams' ? (
                 <>
                   <h2 className="text-sm font-semibold text-neutral-600 mb-3 uppercase">
-                    Teams ({teams.length})
+                    {tx(`Teams (${teams.length})`, `Team (${teams.length})`)}
                   </h2>
                   <div className="space-y-3">
                     {teams.length === 0 ? (
                       <Card className="text-center py-6">
-                        <p className="text-neutral-600">No teams available to manage.</p>
+                        <p className="text-neutral-600">{tx('No teams available to manage.', 'Không có team nào để quản lý.')}</p>
                       </Card>
                     ) : (
                       teams.map((team) => (
@@ -369,7 +372,7 @@ export const ManagePage = () => {
                             <div>
                               <p className="font-semibold">{team.name}</p>
                               <p className="text-xs text-neutral-600">
-                                Created {formatVietnamDate(team.created_at, '-')}
+                                {tx('Created', 'Tạo')} {formatVietnamDate(team.created_at, '-')}
                               </p>
                             </div>
                             <Button
@@ -379,7 +382,7 @@ export const ManagePage = () => {
                                 navigate(`/team/${team.id}`)
                               }}
                             >
-                              Manage
+                              {tx('Manage', 'Quản lý')}
                             </Button>
                           </div>
                         </Card>
@@ -391,13 +394,13 @@ export const ManagePage = () => {
                 <div className="space-y-4">
                   <Card className="space-y-3">
                     <h3 className="text-sm font-semibold text-neutral-700 uppercase">
-                      App Users ({filteredAppUsers.length})
+                      {tx(`App Users (${filteredAppUsers.length})`, `Người dùng app (${filteredAppUsers.length})`)}
                     </h3>
                     <Input
-                      label="Search user"
+                      label={tx('Search user', 'Tìm người dùng')}
                       value={userSearch}
                       onChange={(e) => setUserSearch(e.target.value)}
-                      placeholder="Type a name"
+                      placeholder={tx('Type a name', 'Nhập tên')}
                     />
                     <div className="space-y-2">
                       {filteredAppUsers.map((appUser) => {
@@ -410,9 +413,9 @@ export const ManagePage = () => {
                           >
                             <div>
                               <p className="font-semibold text-sm">{appUser.name}</p>
-                              <p className="text-xs text-neutral-600 uppercase">Role: {String(appUser.role || 'user').toLowerCase()}</p>
+                              <p className="text-xs text-neutral-600 uppercase">{tx('Role', 'Vai trò')}: {String(appUser.role || 'user').toLowerCase()}</p>
                             </div>
-                            <span className="text-xs text-neutral-500">Manage</span>
+                            <span className="text-xs text-neutral-500">{tx('Manage', 'Quản lý')}</span>
                           </button>
                         )
                       })}
@@ -424,15 +427,15 @@ export const ManagePage = () => {
                   <Card className="space-y-4">
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <h3 className="text-sm font-semibold text-neutral-700 uppercase">App Secret Keys</h3>
-                        <p className="text-xs text-neutral-500">Generated by admin. Each key: max 10 users, expires in 1 hour.</p>
+                        <h3 className="text-sm font-semibold text-neutral-700 uppercase">{tx('App Secret Keys', 'App Secret Key')}</h3>
+                        <p className="text-xs text-neutral-500">{tx('Generated by admin. Each key: max 10 users, expires in 1 hour.', 'Tạo bởi admin. Mỗi key: tối đa 10 người dùng, hết hạn sau 1 giờ.')}</p>
                       </div>
                       <Button
                         onClick={handleGenerateSecret}
                         loading={actionTargetId === 'secret-generate'}
                         disabled={actionTargetId === 'secret-generate'}
                       >
-                        Generate Key
+                        {tx('Generate Key', 'Tạo key')}
                       </Button>
                     </div>
 
@@ -446,7 +449,7 @@ export const ManagePage = () => {
 
                     <div className="space-y-3">
                       {appSecrets.length === 0 ? (
-                        <p className="text-sm text-neutral-600">No app secret keys yet.</p>
+                        <p className="text-sm text-neutral-600">{tx('No app secret keys yet.', 'Chưa có app secret key.')}</p>
                       ) : (
                         appSecrets.map((secret) => {
                           const expiresAtMs = toUnixTimestamp(secret.expires_at)
@@ -456,12 +459,12 @@ export const ManagePage = () => {
                           const shouldShowActions = Boolean(secret.is_active) && !isExpired
                           const usageLabel = `${secret.used_count}/${secret.max_uses}`
                           const statusLabel = !secret.is_active
-                            ? 'Revoked'
+                            ? tx('Revoked', 'Đã vô hiệu')
                             : isExpired
-                              ? 'Expired'
+                              ? tx('Expired', 'Hết hạn')
                               : isUsedUp
-                                ? 'Used up'
-                                : 'Active'
+                                ? tx('Used up', 'Hết lượt')
+                                : tx('Active', 'Đang hoạt động')
 
                           return (
                             <Card key={secret.id} className="border border-neutral-200">
@@ -470,7 +473,7 @@ export const ManagePage = () => {
                                   <div>
                                     <p className="font-semibold text-sm break-all">{maskAppSecretKey(secret.secret_key)}</p>
                                     <p className="text-xs text-neutral-500">
-                                      Created by {secret.users?.name || 'Admin'} • {formatVietnamDateTime(secret.created_at, '-')}
+                                      {tx('Created by', 'Tạo bởi')} {secret.users?.name || 'Admin'} • {formatVietnamDateTime(secret.created_at, '-')}
                                     </p>
                                   </div>
                                   <span className="text-xs font-semibold px-2 py-1 rounded-full bg-neutral-100 text-neutral-700">
@@ -479,9 +482,9 @@ export const ManagePage = () => {
                                 </div>
 
                                 <div className="text-xs text-neutral-600 flex flex-wrap gap-x-4 gap-y-1">
-                                  <span>Usage: {usageLabel}</span>
-                                  <span>Expires: {formatVietnamDateTime(secret.expires_at, '-')}</span>
-                                  {secret.revoked_at ? <span>Revoked: {formatVietnamDateTime(secret.revoked_at, '-')}</span> : null}
+                                  <span>{tx('Usage', 'Lượt dùng')}: {usageLabel}</span>
+                                  <span>{tx('Expires', 'Hết hạn')}: {formatVietnamDateTime(secret.expires_at, '-')}</span>
+                                  {secret.revoked_at ? <span>{tx('Revoked', 'Vô hiệu')}: {formatVietnamDateTime(secret.revoked_at, '-')}</span> : null}
                                 </div>
 
                                 {shouldShowActions ? (
@@ -491,7 +494,7 @@ export const ManagePage = () => {
                                       className="flex-1"
                                       onClick={() => handleCopySecret(secret.secret_key)}
                                     >
-                                      Copy
+                                      {tx('Copy', 'Sao chép')}
                                     </Button>
                                     <Button
                                       variant="danger"
@@ -500,7 +503,7 @@ export const ManagePage = () => {
                                       loading={actionTargetId === `secret-revoke-${secret.id}`}
                                       disabled={!canRevoke || actionTargetId === `secret-revoke-${secret.id}`}
                                     >
-                                      Revoke
+                                      {tx('Revoke', 'Vô hiệu')}
                                     </Button>
                                   </div>
                                 ) : null}
@@ -516,18 +519,18 @@ export const ManagePage = () => {
                 <div className="space-y-4">
                   <Card className="space-y-4">
                     <div>
-                      <h3 className="text-sm font-semibold text-neutral-700 uppercase">App Settings</h3>
-                      <p className="text-xs text-neutral-500">Global settings for app behavior.</p>
+                      <h3 className="text-sm font-semibold text-neutral-700 uppercase">{tx('App Settings', 'Cài đặt app')}</h3>
+                      <p className="text-xs text-neutral-500">{tx('Global settings for app behavior.', 'Cài đặt toàn cục cho hành vi ứng dụng.')}</p>
                     </div>
 
                     <div className="space-y-3 rounded-xl border border-neutral-200 bg-neutral-50 p-3">
                       <div>
-                        <p className="text-sm font-semibold text-neutral-800">Notifications Retention Days</p>
-                        <p className="text-xs text-neutral-600">Notifications older than this value are deleted automatically by cron.</p>
+                        <p className="text-sm font-semibold text-neutral-800">{tx('Notifications Retention Days', 'Số ngày lưu thông báo')}</p>
+                        <p className="text-xs text-neutral-600">{tx('Notifications older than this value are deleted automatically by cron.', 'Thông báo cũ hơn mốc này sẽ được cron tự động xóa.')}</p>
                       </div>
 
                       <Input
-                        label="Retention Days"
+                        label={tx('Retention Days', 'Số ngày lưu')}
                         type="number"
                         min={1}
                         max={365}
@@ -550,7 +553,7 @@ export const ManagePage = () => {
                         disabled={!notificationsRetentionDays || actionTargetId === 'notifications-retention-save'}
                         className="w-full"
                       >
-                        Save
+                        {tx('Save', 'Lưu')}
                       </Button>
                     </div>
                   </Card>
@@ -564,7 +567,7 @@ export const ManagePage = () => {
       <Modal
         isOpen={userModalOpen}
         onClose={closeUserModal}
-        title="Manage User"
+        title={tx('Manage User', 'Quản lý người dùng')}
         footer={(
           <div className="flex gap-2 w-full">
             <Button
@@ -574,7 +577,7 @@ export const ManagePage = () => {
               loading={modalActionLoading && actionTargetId === `delete-${selectedUser?.id}`}
               disabled={!selectedUser || String(selectedUser.id) === String(user.id) || (selectedUser?.role || '').toLowerCase() === 'admin'}
             >
-              Delete User
+              {tx('Delete User', 'Xóa người dùng')}
             </Button>
             <Button
               className="flex-1"
@@ -582,18 +585,18 @@ export const ManagePage = () => {
               loading={modalActionLoading && actionTargetId === `role-${selectedUser?.id}`}
               disabled={!selectedUser || String(selectedUser.id) === String(user.id)}
             >
-              Save Role
+              {tx('Save Role', 'Lưu vai trò')}
             </Button>
           </div>
         )}
       >
         <div className="space-y-4">
           <div>
-            <p className="text-sm text-neutral-600">User</p>
+            <p className="text-sm text-neutral-600">{tx('User', 'Người dùng')}</p>
             <p className="font-semibold">{selectedUser?.name || '-'}</p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-neutral-700 mb-2">Role</label>
+            <label className="block text-sm font-medium text-neutral-700 mb-2">{tx('Role', 'Vai trò')}</label>
             <select
               className="input-field"
               value={nextRole}
@@ -611,7 +614,7 @@ export const ManagePage = () => {
       <Modal
         isOpen={deleteUserConfirmOpen}
         onClose={() => setDeleteUserConfirmOpen(false)}
-        title="Delete User"
+        title={tx('Delete User', 'Xóa người dùng')}
         footer={(
           <div className="flex gap-2 w-full">
             <Button
@@ -620,7 +623,7 @@ export const ManagePage = () => {
               onClick={() => setDeleteUserConfirmOpen(false)}
               disabled={modalActionLoading && actionTargetId === `delete-${selectedUser?.id}`}
             >
-              Cancel
+              {tx('Cancel', 'Hủy')}
             </Button>
             <Button
               variant="danger"
@@ -629,13 +632,16 @@ export const ManagePage = () => {
               loading={modalActionLoading && actionTargetId === `delete-${selectedUser?.id}`}
               disabled={!selectedUser || String(selectedUser.id) === String(user.id) || (selectedUser?.role || '').toLowerCase() === 'admin'}
             >
-              Delete
+              {tx('Delete', 'Xóa')}
             </Button>
           </div>
         )}
       >
         <p className="text-sm text-neutral-600">
-          {`Are you sure you want to delete user "${selectedUser?.name || ''}"? This action cannot be undone.`}
+          {tx(
+            `Are you sure you want to delete user "${selectedUser?.name || ''}"? This action cannot be undone.`,
+            `Bạn có chắc muốn xóa người dùng "${selectedUser?.name || ''}"? Hành động này không thể hoàn tác.`
+          )}
         </p>
       </Modal>
 

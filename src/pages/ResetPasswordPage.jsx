@@ -4,11 +4,14 @@ import { motion } from 'framer-motion'
 import { ArrowLeft } from 'lucide-react'
 import { Button, Card, Input } from '../components'
 import { updatePassword } from '../lib/api'
+import { useLanguage } from '../contexts/LanguageContext'
 
 const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$/
 
 export const ResetPasswordPage = () => {
   const navigate = useNavigate()
+  const { language } = useLanguage()
+  const tx = (en, vi) => (language === 'vi' ? vi : en)
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -23,12 +26,15 @@ export const ResetPasswordPage = () => {
     setError('')
 
     if (!isPasswordValid) {
-      setError('Password must include uppercase, lowercase, number, special char, and 8+ characters.')
+      setError(tx(
+        'Password must include uppercase, lowercase, number, special char, and 8+ characters.',
+        'Mật khẩu phải có chữ hoa, chữ thường, số, ký tự đặc biệt và tối thiểu 8 ký tự.'
+      ))
       return
     }
 
     if (!isPasswordMatching) {
-      setError('Passwords do not match.')
+      setError(tx('Passwords do not match.', 'Mật khẩu xác nhận không khớp.'))
       return
     }
 
@@ -37,7 +43,7 @@ export const ResetPasswordPage = () => {
       await updatePassword(password)
       setSuccess(true)
     } catch (submitError) {
-      setError(submitError.message || 'Unable to update password right now.')
+      setError(submitError.message || tx('Unable to update password right now.', 'Không thể cập nhật mật khẩu lúc này.'))
     } finally {
       setLoading(false)
     }
@@ -51,10 +57,10 @@ export const ResetPasswordPage = () => {
           animate={{ opacity: 1, scale: 1 }}
           className="bg-white rounded-2xl p-8 max-w-md w-full text-center"
         >
-          <h2 className="text-2xl font-bold mb-2">Password updated</h2>
-          <p className="text-neutral-600 mb-6">Your password has been changed successfully.</p>
+          <h2 className="text-2xl font-bold mb-2">{tx('Password updated', 'Đã cập nhật mật khẩu')}</h2>
+          <p className="text-neutral-600 mb-6">{tx('Your password has been changed successfully.', 'Mật khẩu của bạn đã được thay đổi thành công.')}</p>
           <Button onClick={() => navigate('/login')} className="w-full">
-            Go to Login
+            {tx('Go to Login', 'Đi đến đăng nhập')}
           </Button>
         </motion.div>
       </div>
@@ -73,30 +79,30 @@ export const ResetPasswordPage = () => {
           className="flex items-center gap-2 text-primary-400 mb-8 hover:text-primary-600 transition"
         >
           <ArrowLeft size={20} />
-          Back to Login
+          {tx('Back to Login', 'Quay lại đăng nhập')}
         </button>
 
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-primary-400 mb-2">Set New Password</h1>
-          <p className="text-neutral-600">Enter your new password to finish recovery.</p>
+          <h1 className="text-3xl font-bold text-primary-400 mb-2">{tx('Set New Password', 'Đặt mật khẩu mới')}</h1>
+          <p className="text-neutral-600">{tx('Enter your new password to finish recovery.', 'Nhập mật khẩu mới để hoàn tất khôi phục.')}</p>
         </div>
 
         <Card className="mb-6">
           <form onSubmit={handleSubmit} className="space-y-4">
             <Input
-              label="New Password"
+              label={tx('New Password', 'Mật khẩu mới')}
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               placeholder="••••••••"
             />
             <Input
-              label="Confirm New Password"
+              label={tx('Confirm New Password', 'Xác nhận mật khẩu mới')}
               type="password"
               value={confirmPassword}
               onChange={(event) => setConfirmPassword(event.target.value)}
               placeholder="••••••••"
-              error={confirmPassword && !isPasswordMatching ? 'Passwords do not match' : ''}
+              error={confirmPassword && !isPasswordMatching ? tx('Passwords do not match', 'Mật khẩu xác nhận không khớp') : ''}
             />
 
             {error && (
@@ -111,7 +117,7 @@ export const ResetPasswordPage = () => {
               disabled={!password || !confirmPassword || loading}
               className="w-full"
             >
-              Update Password
+              {tx('Update Password', 'Cập nhật mật khẩu')}
             </Button>
           </form>
         </Card>
