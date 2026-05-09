@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Header, Card, Button, Input } from '../components'
 import { createTeam } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
+import { useLanguage } from '../contexts/LanguageContext'
 import { useTeam } from '../contexts/TeamContext'
 import { motion } from 'framer-motion'
 
@@ -10,6 +11,8 @@ export const CreateTeamPage = () => {
   const maxTeamNameLength = 20
   const navigate = useNavigate()
   const { user } = useAuth()
+  const { language } = useLanguage()
+  const tx = (en, vi) => (language === 'vi' ? vi : en)
   const { refreshTeams, setCurrentTeam } = useTeam()
   const [teamName, setTeamName] = useState('')
   const [loading, setLoading] = useState(false)
@@ -19,7 +22,10 @@ export const CreateTeamPage = () => {
     e.preventDefault()
     if (!teamName.trim()) return
     if (teamName.trim().length > maxTeamNameLength) {
-      setError(`Team name must be ${maxTeamNameLength} characters or fewer.`)
+      setError(tx(
+        `Team name must be ${maxTeamNameLength} characters or fewer.`,
+        `Tên team phải có tối đa ${maxTeamNameLength} ký tự.`
+      ))
       return
     }
 
@@ -33,7 +39,7 @@ export const CreateTeamPage = () => {
         teams: createdTeam,
       })
       await refreshTeams()
-      navigate('/', { state: { success: true, message: 'Team created successfully!' } })
+      navigate('/', { state: { success: true, message: tx('Team created successfully!', 'Tạo team thành công!') } })
     } catch (err) {
       setError(err.message)
     } finally {
@@ -47,13 +53,13 @@ export const CreateTeamPage = () => {
       animate={{ opacity: 1 }}
       className="min-h-screen bg-neutral-100"
     >
-      <Header title="Create Team" />
+      <Header title={tx('Create Team', 'Tạo team')} />
 
       <div className="container-mobile py-8">
         <Card className="mb-6">
           <form onSubmit={handleCreateTeam} className="space-y-4">
             <Input
-              label="Team Name"
+              label={tx('Team Name', 'Tên team')}
               value={teamName}
               onChange={(e) => {
                 setTeamName(e.target.value)
@@ -61,7 +67,7 @@ export const CreateTeamPage = () => {
                   setError('')
                 }
               }}
-              placeholder="e.g., Morning Club"
+              placeholder={tx('e.g., Morning Club', 'ví dụ: Morning Club')}
               maxLength={maxTeamNameLength}
               autoFocus
             />
@@ -81,7 +87,7 @@ export const CreateTeamPage = () => {
               loading={loading}
               className="w-full"
             >
-              Create Team
+              {tx('Create Team', 'Tạo team')}
             </Button>
 
             <Button
@@ -90,14 +96,17 @@ export const CreateTeamPage = () => {
               onClick={() => navigate(-1)}
               className="w-full"
             >
-              Cancel
+              {tx('Cancel', 'Hủy')}
             </Button>
           </form>
         </Card>
 
         <Card className="bg-neutral-100 border-0 shadow-none">
           <p className="text-sm text-neutral-600">
-            Tip: After creating a team, you&apos;ll automatically join it and other users can join or be added later.
+            {tx(
+              'Tip: After creating a team, you\'ll automatically join it and other users can join or be added later.',
+              'Mẹo: Sau khi tạo team, bạn sẽ tự động tham gia và có thể thêm hoặc mời người khác vào sau.'
+            )}
           </p>
         </Card>
       </div>

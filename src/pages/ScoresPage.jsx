@@ -6,6 +6,7 @@ import { formatBangkokDateTime, getBangkokDateKey } from '../lib/dateTime'
 import { motion } from 'framer-motion'
 import { ChevronDown, ChevronRight, Clock3, Minus, Plus } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
+import { useLanguage } from '../contexts/LanguageContext'
 import { useTeam } from '../contexts/TeamContext'
 
 const emptyMatchConfig = {
@@ -50,6 +51,8 @@ const getTeamDisplayName = (playerOne, playerTwo, matchType = 'DOUBLES') => {
 export const ScoresPage = () => {
   const location = useLocation()
   const { user } = useAuth()
+  const { language } = useLanguage()
+  const tx = (en, vi) => (language === 'vi' ? vi : en)
   const { currentTeam, loading: teamsLoading } = useTeam()
 
   const [events, setEvents] = useState([])
@@ -153,7 +156,7 @@ export const ScoresPage = () => {
       setTeamMembers([])
       setSelectedEventId('')
       setHistory([])
-      setScoreError('Unable to load score data right now.')
+      setScoreError(tx('Unable to load score data right now.', 'Không thể tải dữ liệu tỷ số lúc này.'))
     } finally {
       setLoading(false)
     }
@@ -166,7 +169,7 @@ export const ScoresPage = () => {
     } catch (error) {
       console.error('Error loading event match scores:', error)
       setHistory([])
-      setScoreError('Unable to load score history for this event.')
+      setScoreError(tx('Unable to load score history for this event.', 'Không thể tải lịch sử tỷ số của sự kiện này.'))
     }
   }
 
@@ -189,17 +192,17 @@ export const ScoresPage = () => {
 
   const handleStartMatch = async () => {
     if (!selectedEventId) {
-      setScoreError('Please choose an event first.')
+      setScoreError(tx('Please choose an event first.', 'Vui lòng chọn sự kiện trước.'))
       return
     }
 
     if (String(selectedEvent?.status || '').toUpperCase() === 'COMPLETED') {
-      setScoreError('Completed events cannot be scored.')
+      setScoreError(tx('Completed events cannot be scored.', 'Sự kiện đã hoàn tất thì không thể ghi tỷ số.'))
       return
     }
 
     if (!user?.id) {
-      setScoreError('Please sign in again to start a match.')
+      setScoreError(tx('Please sign in again to start a match.', 'Vui lòng đăng nhập lại để bắt đầu trận đấu.'))
       return
     }
 
@@ -210,13 +213,13 @@ export const ScoresPage = () => {
     ]
 
     if (requiredPlayerIds.some((value) => !value)) {
-      setScoreError('Please select all required players before starting.')
+      setScoreError(tx('Please select all required players before starting.', 'Vui lòng chọn đủ người chơi trước khi bắt đầu.'))
       return
     }
 
     const uniquePlayerIds = new Set(requiredPlayerIds)
     if (uniquePlayerIds.size !== requiredPlayerIds.length) {
-      setScoreError('Each player must be unique in this match.')
+      setScoreError(tx('Each player must be unique in this match.', 'Mỗi người chơi phải là duy nhất trong trận này.'))
       return
     }
 
@@ -231,7 +234,7 @@ export const ScoresPage = () => {
       )
     } catch (error) {
       console.error('Error auto check-in before match start:', error)
-      setScoreError('Unable to check in all players for this match.')
+      setScoreError(tx('Unable to check in all players for this match.', 'Không thể check-in tất cả người chơi cho trận này.'))
       return
     } finally {
       setStartingMatch(false)
@@ -307,7 +310,7 @@ export const ScoresPage = () => {
       setScoreError('')
     } catch (error) {
       console.error('Error saving match score:', error)
-      setScoreError('Unable to save match score. Please try again.')
+      setScoreError(tx('Unable to save match score. Please try again.', 'Không thể lưu tỷ số trận đấu. Vui lòng thử lại.'))
     } finally {
       setSaving(false)
     }
@@ -319,7 +322,7 @@ export const ScoresPage = () => {
     }
 
     const member = teamMembers.find((item) => String(item.user_id) === String(memberId))
-    return member?.users?.name || 'Unknown'
+    return member?.users?.name || tx('Unknown', 'Không rõ')
   }
 
   const toggleHistoryDay = (dayKey, event) => {
@@ -345,20 +348,20 @@ export const ScoresPage = () => {
       className="min-h-screen pb-24"
     >
       <Header
-        title="Scores"
-        subtitle={selectedEvent ? `${selectedEvent.title} · ${formatBangkokDateTime(selectedEvent.date)}` : 'Only today events can be scored'}
+        title={tx('Scores', 'Tỷ số')}
+        subtitle={selectedEvent ? `${selectedEvent.title} · ${formatBangkokDateTime(selectedEvent.date)}` : tx('Only today events can be scored', 'Chỉ sự kiện hôm nay mới được ghi tỷ số')}
       />
 
       <div className="container-mobile py-6 space-y-4">
         {!currentTeam ? (
           <Card className="text-center py-12">
-            <p className="text-neutral-600 mb-3">Select a team on Home before recording scores.</p>
+            <p className="text-neutral-600 mb-3">{tx('Select a team on Home before recording scores.', 'Hãy chọn team ở Home trước khi ghi tỷ số.')}</p>
           </Card>
         ) : (
           <>
             {!activeMatch && (
               <Card className="space-y-3">
-                <p className="text-xs text-neutral-600 uppercase">Today Event</p>
+                <p className="text-xs text-neutral-600 uppercase">{tx('Today Event', 'Sự kiện hôm nay')}</p>
                 <select
                   className="input-field"
                   value={selectedEventId}
@@ -368,13 +371,13 @@ export const ScoresPage = () => {
                     setScoreError('')
                   }}
                 >
-                  <option value="">Select today event</option>
+                  <option value="">{tx('Select today event', 'Chọn sự kiện hôm nay')}</option>
                   {events.map((event) => (
                     <option key={event.id} value={event.id}>{`${event.title} · ${formatBangkokDateTime(event.date)}`}</option>
                   ))}
                 </select>
                 {!selectedEventId && (
-                  <p className="text-xs text-warning-900">No event today. Upcoming/past events are not allowed for scoring.</p>
+                  <p className="text-xs text-warning-900">{tx('No event today. Upcoming/past events are not allowed for scoring.', 'Hôm nay không có sự kiện. Sự kiện sắp tới/quá khứ không được ghi tỷ số.')}</p>
                 )}
               </Card>
             )}
@@ -382,7 +385,7 @@ export const ScoresPage = () => {
             {selectedEventId && !activeMatch && (
               <Card className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <p className="text-xs text-neutral-600 uppercase">New Match</p>
+                  <p className="text-xs text-neutral-600 uppercase">{tx('New Match', 'Trận mới')}</p>
                   <Badge status="warning">{matchConfig.matchType === 'DOUBLES' ? '2 vs 2' : '1 vs 1'}</Badge>
                 </div>
 
@@ -404,15 +407,15 @@ export const ScoresPage = () => {
                 </div>
 
                 <div className="space-y-2">
-                  <p className="text-xs font-semibold text-neutral-600 uppercase">Team A</p>
+                  <p className="text-xs font-semibold text-neutral-600 uppercase">{tx('Team A', 'Đội A')}</p>
                   <select
                     className="input-field"
                     value={matchConfig.teamAPlayer1}
                     onChange={(event) => updateMatchConfig('teamAPlayer1', event.target.value)}
                   >
-                    <option value="">Select player 1</option>
+                    <option value="">{tx('Select player 1', 'Chọn người chơi 1')}</option>
                     {teamMembers.map((member) => (
-                      <option key={member.user_id} value={member.user_id}>{member.users?.name || 'Unknown'}</option>
+                      <option key={member.user_id} value={member.user_id}>{member.users?.name || tx('Unknown', 'Không rõ')}</option>
                     ))}
                   </select>
                   {matchConfig.matchType === 'DOUBLES' && (
@@ -421,24 +424,24 @@ export const ScoresPage = () => {
                       value={matchConfig.teamAPlayer2}
                       onChange={(event) => updateMatchConfig('teamAPlayer2', event.target.value)}
                     >
-                      <option value="">Select player 2</option>
+                      <option value="">{tx('Select player 2', 'Chọn người chơi 2')}</option>
                       {teamMembers.map((member) => (
-                        <option key={`a-${member.user_id}`} value={member.user_id}>{member.users?.name || 'Unknown'}</option>
+                        <option key={`a-${member.user_id}`} value={member.user_id}>{member.users?.name || tx('Unknown', 'Không rõ')}</option>
                       ))}
                     </select>
                   )}
                 </div>
 
                 <div className="space-y-2">
-                  <p className="text-xs font-semibold text-neutral-600 uppercase">Team B</p>
+                  <p className="text-xs font-semibold text-neutral-600 uppercase">{tx('Team B', 'Đội B')}</p>
                   <select
                     className="input-field"
                     value={matchConfig.teamBPlayer1}
                     onChange={(event) => updateMatchConfig('teamBPlayer1', event.target.value)}
                   >
-                    <option value="">Select player 1</option>
+                    <option value="">{tx('Select player 1', 'Chọn người chơi 1')}</option>
                     {teamMembers.map((member) => (
-                      <option key={`b-${member.user_id}`} value={member.user_id}>{member.users?.name || 'Unknown'}</option>
+                      <option key={`b-${member.user_id}`} value={member.user_id}>{member.users?.name || tx('Unknown', 'Không rõ')}</option>
                     ))}
                   </select>
                   {matchConfig.matchType === 'DOUBLES' && (
@@ -447,16 +450,16 @@ export const ScoresPage = () => {
                       value={matchConfig.teamBPlayer2}
                       onChange={(event) => updateMatchConfig('teamBPlayer2', event.target.value)}
                     >
-                      <option value="">Select player 2</option>
+                      <option value="">{tx('Select player 2', 'Chọn người chơi 2')}</option>
                       {teamMembers.map((member) => (
-                        <option key={`d-${member.user_id}`} value={member.user_id}>{member.users?.name || 'Unknown'}</option>
+                        <option key={`d-${member.user_id}`} value={member.user_id}>{member.users?.name || tx('Unknown', 'Không rõ')}</option>
                       ))}
                     </select>
                   )}
                 </div>
 
                 <Button onClick={handleStartMatch} loading={startingMatch} className="w-full">
-                  Start Score
+                  {tx('Start Score', 'Bắt đầu ghi tỷ số')}
                 </Button>
               </Card>
             )}
@@ -465,10 +468,10 @@ export const ScoresPage = () => {
               <Card className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-xs text-neutral-600 uppercase">Live Match</p>
-                    <p className="text-sm text-neutral-700">Start: {formatBangkokDateTime(activeMatch.startedAt)}</p>
+                    <p className="text-xs text-neutral-600 uppercase">{tx('Live Match', 'Trận đang diễn ra')}</p>
+                    <p className="text-sm text-neutral-700">{tx('Start:', 'Bắt đầu:')} {formatBangkokDateTime(activeMatch.startedAt)}</p>
                   </div>
-                  <Badge status="success">Running</Badge>
+                  <Badge status="success">{tx('Running', 'Đang chạy')}</Badge>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
@@ -479,13 +482,13 @@ export const ScoresPage = () => {
                       <Button variant="secondary" className="w-full min-w-0 px-2" onClick={() => handleDecreaseScore('A')}>
                         <span className="inline-flex items-center gap-1 whitespace-nowrap text-xs">
                           <Minus size={14} />
-                          Undo
+                          {tx('Undo', 'Trừ')}
                         </span>
                       </Button>
                       <Button className="w-full min-w-0 px-2" onClick={() => handleIncreaseScore('A')}>
                         <span className="inline-flex items-center gap-1 whitespace-nowrap text-xs">
                           <Plus size={14} />
-                          Add
+                          {tx('Add', 'Cộng')}
                         </span>
                       </Button>
                     </div>
@@ -504,7 +507,7 @@ export const ScoresPage = () => {
                       <Button className="w-full min-w-0 px-2" onClick={() => handleIncreaseScore('B')}>
                         <span className="inline-flex items-center gap-1 whitespace-nowrap text-xs">
                           <Plus size={14} />
-                          Add
+                          {tx('Add', 'Cộng')}
                         </span>
                       </Button>
                     </div>
@@ -513,10 +516,10 @@ export const ScoresPage = () => {
 
                 <div className="grid grid-cols-2 gap-2">
                   <Button variant="secondary" onClick={handleDiscardActiveMatch}>
-                    Cancel
+                    {tx('Cancel', 'Hủy')}
                   </Button>
                   <Button onClick={handleSaveMatch} loading={saving}>
-                    Save Score
+                    {tx('Save Score', 'Lưu tỷ số')}
                   </Button>
                 </div>
               </Card>
@@ -530,14 +533,14 @@ export const ScoresPage = () => {
 
             <div>
               <div className="flex items-center justify-between mb-2">
-                <p className="text-sm font-semibold text-neutral-600 uppercase">History</p>
+                <p className="text-sm font-semibold text-neutral-600 uppercase">{tx('History', 'Lịch sử')}</p>
                 {selectedEvent && <Badge status="success">{selectedEvent.title}</Badge>}
               </div>
 
               {history.length === 0 ? (
                 <Card className="text-center py-8">
                   <Clock3 size={28} className="mx-auto text-neutral-300 mb-2" />
-                  <p className="text-sm text-neutral-600">No scores saved for this event yet.</p>
+                  <p className="text-sm text-neutral-600">{tx('No scores saved for this event yet.', 'Sự kiện này chưa có tỷ số nào được lưu.')}</p>
                 </Card>
               ) : (
                 <div className="space-y-2">
@@ -553,7 +556,11 @@ export const ScoresPage = () => {
                             {expandedHistoryDays[group.dayKey] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                             {group.dayLabel}
                           </span>
-                          <Badge status="warning">{group.matches.length} match{group.matches.length > 1 ? 'es' : ''}</Badge>
+                          <Badge status="warning">
+                            {language === 'vi'
+                              ? `${group.matches.length} trận`
+                              : `${group.matches.length} match${group.matches.length > 1 ? 'es' : ''}`}
+                          </Badge>
                         </span>
                       </button>
 
@@ -574,13 +581,13 @@ export const ScoresPage = () => {
                                     {getTeamDisplayName(match.team_b_player_1_user?.name, match.team_b_player_2_user?.name, match.match_type)}
                                   </p>
                                 </div>
-                                <Badge status="warning">Saved</Badge>
+                                <Badge status="warning">{tx('Saved', 'Đã lưu')}</Badge>
                               </div>
 
                               <div className="text-xs text-neutral-600 space-y-1">
-                                <p>Start: {formatBangkokDateTime(match.started_at)}</p>
-                                <p>Duration: {formatDuration(match.duration_seconds)}</p>
-                                <p>Saved by: {match.created_by_user?.name || 'Unknown'}</p>
+                                <p>{tx('Start:', 'Bắt đầu:')} {formatBangkokDateTime(match.started_at)}</p>
+                                <p>{tx('Duration:', 'Thời lượng:')} {formatDuration(match.duration_seconds)}</p>
+                                <p>{tx('Saved by:', 'Lưu bởi:')} {match.created_by_user?.name || tx('Unknown', 'Không rõ')}</p>
                               </div>
                             </div>
                           ))}

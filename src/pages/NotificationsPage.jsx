@@ -6,11 +6,12 @@ import {
   markAllNotificationsAsRead,
   markNotificationAsRead,
 } from '../lib/api'
+import { useLanguage } from '../contexts/LanguageContext'
 
 const NOTIFICATION_TYPE_LABELS = {
   PAYMENT_RECEIVED: 'Payment',
   TEAM_MEMBER_ADDED: 'Team',
-  EVENT_PARTICIPANT_ADDED: 'Check-In',
+  EVENT_PARTICIPANT_ADDED: 'Check-in',
   EVENT_CREATED: 'Event',
   EVENT_JOINING_LOCKED: 'Event',
   EVENT_CANCELLED: 'Event',
@@ -27,6 +28,25 @@ const NOTIFICATION_TYPE_LABELS = {
   PAYMENT_REJECTED_BY_RECEIVER: 'Payment',
   EVENT_SETTLEMENT_PAYMENT_REQUIRED: 'Settlement',
   EVENT_SETTLEMENT_PAYOUT_AVAILABLE: 'Settlement',
+}
+
+const localizeNotificationTypeLabel = (label, tx) => {
+  switch (label) {
+    case 'Payment':
+      return tx('Payment', 'Thanh toán')
+    case 'Team':
+      return tx('Team', 'Team')
+    case 'Check-in':
+      return tx('Check-in', 'Check-in')
+    case 'Event':
+      return tx('Event', 'Sự kiện')
+    case 'Settlement':
+      return tx('Settlement', 'Settlement')
+    case 'Expense':
+      return tx('Expense', 'Chi phí')
+    default:
+      return label
+  }
 }
 
 const parseNotificationDate = (value) => {
@@ -46,7 +66,8 @@ const parseNotificationDate = (value) => {
   return new Date(value)
 }
 
-const toRelativeTime = (dateValue) => {
+const toRelativeTime = (dateValue, language = 'en') => {
+  const tx = (en, vi) => (language === 'vi' ? vi : en)
   const timestamp = parseNotificationDate(dateValue).getTime()
   if (!Number.isFinite(timestamp)) {
     return '-'
@@ -55,19 +76,21 @@ const toRelativeTime = (dateValue) => {
   const diffMs = Date.now() - timestamp
   const diffMinutes = Math.floor(diffMs / (60 * 1000))
 
-  if (diffMinutes < 1) return 'Just now'
-  if (diffMinutes < 60) return `${diffMinutes}m ago`
+  if (diffMinutes < 1) return tx('Just now', 'Vừa xong')
+  if (diffMinutes < 60) return language === 'vi' ? `${diffMinutes} phút trước` : `${diffMinutes}m ago`
 
   const diffHours = Math.floor(diffMinutes / 60)
-  if (diffHours < 24) return `${diffHours}h ago`
+  if (diffHours < 24) return language === 'vi' ? `${diffHours} giờ trước` : `${diffHours}h ago`
 
   const diffDays = Math.floor(diffHours / 24)
-  return `${diffDays}d ago`
+  return language === 'vi' ? `${diffDays} ngày trước` : `${diffDays}d ago`
 }
 
 export const NotificationsPage = () => {
   const navigate = useNavigate()
   const location = useLocation()
+  const { language } = useLanguage()
+  const tx = (en, vi) => (language === 'vi' ? vi : en)
   const [notifications, setNotifications] = useState([])
   const [loading, setLoading] = useState(true)
   const loadingRef = useRef(false)
@@ -157,10 +180,10 @@ export const NotificationsPage = () => {
           <div>
             <p className="font-semibold text-neutral-900">{notification.title}</p>
             <p className="text-sm text-neutral-700 mt-1">{notification.message}</p>
-            <p className="text-xs text-neutral-500 mt-2">{toRelativeTime(notification.created_at)}</p>
+            <p className="text-xs text-neutral-500 mt-2">{toRelativeTime(notification.created_at, language)}</p>
           </div>
           <Badge status={notification.is_read ? 'success' : 'warning'}>
-            {NOTIFICATION_TYPE_LABELS[notification.type] || 'Notice'}
+            {localizeNotificationTypeLabel(NOTIFICATION_TYPE_LABELS[notification.type] || tx('Notice', 'Thông báo'), tx)}
           </Badge>
         </div>
       </Card>
@@ -169,7 +192,7 @@ export const NotificationsPage = () => {
 
   return (
     <div className="pb-24">
-      <Header title="Notifications" subtitle="Activity and updates" />
+      <Header title={tx('Notifications', 'Thông báo')} subtitle={tx('Activity and updates', 'Hoạt động và cập nhật')} />
 
       <div className="container-mobile py-6 space-y-3">
         {loading ? (
@@ -178,25 +201,25 @@ export const NotificationsPage = () => {
           </div>
         ) : notifications.length === 0 ? (
           <Card className="text-center py-10">
-            <p className="text-neutral-600">No notifications yet.</p>
+            <p className="text-neutral-600">{tx('No notifications yet.', 'Chưa có thông báo nào.')}</p>
           </Card>
         ) : (
           <>
             <section className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-primary-600">Unread</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-primary-600">{tx('Unread', 'Chưa đọc')}</p>
               {newNotifications.length > 0 ? (
                 newNotifications.map((notification) => renderNotificationItem(notification))
               ) : (
-                <Card className="py-4 text-center text-sm text-neutral-500">No new notifications.</Card>
+                <Card className="py-4 text-center text-sm text-neutral-500">{tx('No new notifications.', 'Không có thông báo mới.')}</Card>
               )}
             </section>
 
             <section className="space-y-2 pt-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Read</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{tx('Read', 'Đã đọc')}</p>
               {oldNotifications.length > 0 ? (
                 oldNotifications.map((notification) => renderNotificationItem(notification))
               ) : (
-                <Card className="py-4 text-center text-sm text-neutral-500">No old notifications.</Card>
+                <Card className="py-4 text-center text-sm text-neutral-500">{tx('No old notifications.', 'Không có thông báo cũ.')}</Card>
               )}
             </section>
           </>

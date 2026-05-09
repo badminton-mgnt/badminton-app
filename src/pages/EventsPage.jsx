@@ -14,6 +14,7 @@ import { formatBangkokDateTime, getBangkokDateKey, toDateTimeLocalValue, toSupab
 import { motion } from 'framer-motion'
 import { Edit2, Plus, MapPin, Calendar, Trash2, XCircle, ChevronDown, ChevronUp } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
+import { useLanguage } from '../contexts/LanguageContext'
 import { useTeam } from '../contexts/TeamContext'
 
 const CHECKIN_CONFIRM_WINDOW_DAYS = 3
@@ -33,6 +34,8 @@ export const EventsPage = () => {
   const navigate = useNavigate()
   const location = useLocation()
   const { user } = useAuth()
+  const { language } = useLanguage()
+  const tx = (en, vi) => (language === 'vi' ? vi : en)
   const { teams, currentTeam, loading: teamsLoading, setCurrentTeam } = useTeam()
   const [events, setEvents] = useState([])
   const [loading, setLoading] = useState(true)
@@ -368,7 +371,7 @@ export const EventsPage = () => {
       className="pb-24"
     >
       <Header
-        title="Events"
+        title={tx('Events', 'Sự kiện')}
         subtitleContent={
           <button
             type="button"
@@ -379,7 +382,7 @@ export const EventsPage = () => {
               status={currentTeam?.teams?.name ? 'success' : 'warning'}
               className="cursor-pointer bg-white/15 text-white border border-white/20"
             >
-              {currentTeam?.teams?.name || 'No team selected'}
+              {currentTeam?.teams?.name || tx('No team selected', 'Chưa chọn team')}
             </Badge>
           </button>
         }
@@ -399,22 +402,25 @@ export const EventsPage = () => {
         {!currentTeam ? (
           <Card className="text-center py-12">
             <Calendar size={48} className="mx-auto text-neutral-300 mb-4" />
-            <p className="text-neutral-600 mb-4">Select a team on Home to view its events.</p>
+            <p className="text-neutral-600 mb-4">{tx('Select a team on Home to view its events.', 'Hãy chọn team ở Trang chủ để xem sự kiện.')}</p>
             <Button
               onClick={() => navigate('/')}
               variant="secondary"
               className="w-full"
             >
-              Go Home
+              {tx('Go Home', 'Về Trang chủ')}
             </Button>
           </Card>
         ) : (
           <>
             {!currentTeam?.teams?.treasurer_id && (
               <Card className="border border-warning-300 bg-warning-50">
-                <p className="text-sm font-semibold text-warning-900">Team has no treasurer yet.</p>
+                <p className="text-sm font-semibold text-warning-900">{tx('Team has no treasurer yet.', 'Team chưa có thủ quỹ.')}</p>
                 <p className="text-xs text-warning-900 mt-1">
-                  Please ask an admin to assign a treasurer so settlements can be completed smoothly.
+                  {tx(
+                    'Please ask an admin to assign a treasurer so settlements can be completed smoothly.',
+                    'Vui lòng nhờ admin chỉ định thủ quỹ để settlement diễn ra thuận lợi.'
+                  )}
                 </p>
               </Card>
             )}
@@ -425,7 +431,7 @@ export const EventsPage = () => {
                 animate={{ opacity: 1, y: 0 }}
               >
                 <h2 className="text-sm font-semibold text-neutral-600 mb-3 uppercase">
-                  Today
+                  {tx('Today', 'Hôm nay')}
                 </h2>
                 <div className="space-y-3">
                   {todayEvents.map((event, idx) => (
@@ -448,18 +454,18 @@ export const EventsPage = () => {
                           </div>
                           <Badge status={event.status === 'CANCELLED' ? 'error' : getBangkokDateKey(event.date) === todayKey ? 'success' : 'warning'}>
                             {event.status === 'CANCELLED'
-                              ? 'Cancelled'
+                              ? tx('Cancelled', 'Đã hủy')
                               : getBangkokDateKey(event.date) === todayKey
-                              ? 'Today'
-                              : 'Upcoming'}
+                              ? tx('Today', 'Hôm nay')
+                              : tx('Upcoming', 'Sắp tới')}
                           </Badge>
                         </div>
                         <div className="flex items-center gap-4 text-sm text-neutral-600">
                           <div className="flex items-center gap-1">
                             <MapPin size={16} />
-                            {event.location || 'Location TBD'}
+                            {event.location || tx('Location TBD', 'Chưa có địa điểm')}
                           </div>
-                          {event.court_number && <div>Court {event.court_number}</div>}
+                          {event.court_number && <div>{tx('Court', 'Sân')} {event.court_number}</div>}
                         </div>
                         {canEditEvent(event) && (
                           <div className="mt-4 flex gap-2">
@@ -470,7 +476,7 @@ export const EventsPage = () => {
                             >
                               <span className="inline-flex items-center gap-2">
                                 <Edit2 size={14} />
-                                Edit
+                                {tx('Edit', 'Sửa')}
                               </span>
                             </Button>
                             {canCancelEvent(event) && (
@@ -481,7 +487,7 @@ export const EventsPage = () => {
                               >
                                 <span className="inline-flex items-center gap-2">
                                   <XCircle size={14} />
-                                  Cancel
+                                  {tx('Cancel', 'Hủy')}
                                 </span>
                               </Button>
                             )}
@@ -493,7 +499,7 @@ export const EventsPage = () => {
                               >
                                 <span className="inline-flex items-center gap-2">
                                   <Trash2 size={14} />
-                                  Delete
+                                  {tx('Delete', 'Xóa')}
                                 </span>
                               </Button>
                             )}
@@ -513,10 +519,13 @@ export const EventsPage = () => {
                 transition={{ delay: 0.1 }}
               >
                 <h2 className="text-sm font-semibold text-neutral-700 mb-3 uppercase">
-                  Pending Settlement
+                  {tx('Pending Settlement', 'Chờ settlement')}
                 </h2>
                 <p className="text-xs text-neutral-600 mb-3">
-                  Past events stay here until treasurer marks them completed, or they pass the {CHECKIN_CONFIRM_WINDOW_DAYS}-day window.
+                  {tx(
+                    `Past events stay here until treasurer marks them completed, or they pass the ${CHECKIN_CONFIRM_WINDOW_DAYS}-day window.`,
+                    `Sự kiện cũ sẽ ở đây cho đến khi thủ quỹ đánh dấu hoàn tất, hoặc quá mốc ${CHECKIN_CONFIRM_WINDOW_DAYS} ngày.`
+                  )}
                 </p>
                 <div className="space-y-3">
                   {pendingSettlementPastEventsNoCheckIn.map((event) => (
@@ -536,14 +545,14 @@ export const EventsPage = () => {
                               {formatBangkokDateTime(event.date)}
                             </p>
                           </div>
-                          <Badge status="warning">Pending Settlement</Badge>
+                          <Badge status="warning">{tx('Pending Settlement', 'Chờ settlement')}</Badge>
                         </div>
                         <div className="flex items-center gap-4 text-sm text-neutral-600">
                           <div className="flex items-center gap-1">
                             <MapPin size={16} />
-                            {event.location || 'Location TBD'}
+                            {event.location || tx('Location TBD', 'Chưa có địa điểm')}
                           </div>
-                          {event.court_number && <div>Court {event.court_number}</div>}
+                          {event.court_number && <div>{tx('Court', 'Sân')} {event.court_number}</div>}
                         </div>
                       </Card>
                     </motion.div>
@@ -559,7 +568,7 @@ export const EventsPage = () => {
                 transition={{ delay: 0.1 }}
               >
                 <h2 className="text-sm font-semibold text-warning-900 mb-3 uppercase">
-                  Pending Check-In Confirmation
+                  {tx('Pending Check-In Confirmation', 'Chờ xác nhận check-in')}
                 </h2>
                 <div className="space-y-3">
                   {pendingCheckInPastEvents.map((event) => (
@@ -570,10 +579,13 @@ export const EventsPage = () => {
                           <p className="text-xs text-neutral-500">{event?.teams?.name || currentTeam?.teams?.name || 'Team'}</p>
                           <p className="text-sm text-neutral-700">{formatBangkokDateTime(event.date)}</p>
                         </div>
-                        <Badge status="warning">Pending Confirm</Badge>
+                        <Badge status="warning">{tx('Pending Confirm', 'Chờ xác nhận')}</Badge>
                       </div>
                       <p className="text-xs text-warning-900 mb-3">
-                        Confirm if you joined this event. After {CHECKIN_CONFIRM_WINDOW_DAYS} days, this event moves to Completed automatically.
+                        {tx(
+                          `Confirm if you joined this event. After ${CHECKIN_CONFIRM_WINDOW_DAYS} days, this event moves to Completed automatically.`,
+                          `Xác nhận bạn có tham gia sự kiện này không. Sau ${CHECKIN_CONFIRM_WINDOW_DAYS} ngày, sự kiện sẽ tự chuyển sang Hoàn tất.`
+                        )}
                       </p>
                       <div className="flex gap-2">
                         <Button
@@ -583,7 +595,7 @@ export const EventsPage = () => {
                           loading={checkInActionId === `dismiss-${event.id}`}
                           disabled={Boolean(checkInActionId)}
                         >
-                          I Didn&apos;t Join
+                          {tx("I Didn't Join", 'Tôi không tham gia')}
                         </Button>
                         <Button
                           className="flex-1"
@@ -591,7 +603,7 @@ export const EventsPage = () => {
                           loading={checkInActionId === `checkin-${event.id}`}
                           disabled={Boolean(checkInActionId)}
                         >
-                          Check In
+                          {tx('Check In', 'Check-in')}
                         </Button>
                       </div>
                     </Card>
@@ -607,7 +619,7 @@ export const EventsPage = () => {
                 transition={{ delay: todayEvents.length > 0 ? 0.05 : 0 }}
               >
                 <h2 className="text-sm font-semibold text-neutral-600 mb-3 uppercase">
-                  Upcoming
+                  {tx('Upcoming', 'Sắp tới')}
                 </h2>
                 <div className="space-y-3">
                   {upcomingEvents.map((event, idx) => (
@@ -629,15 +641,15 @@ export const EventsPage = () => {
                             </p>
                           </div>
                           <Badge status={event.status === 'CANCELLED' ? 'error' : 'warning'}>
-                            {event.status === 'CANCELLED' ? 'Cancelled' : 'Upcoming'}
+                            {event.status === 'CANCELLED' ? tx('Cancelled', 'Đã hủy') : tx('Upcoming', 'Sắp tới')}
                           </Badge>
                         </div>
                         <div className="flex items-center gap-4 text-sm text-neutral-600">
                           <div className="flex items-center gap-1">
                             <MapPin size={16} />
-                            {event.location || 'Location TBD'}
+                            {event.location || tx('Location TBD', 'Chưa có địa điểm')}
                           </div>
-                          {event.court_number && <div>Court {event.court_number}</div>}
+                          {event.court_number && <div>{tx('Court', 'Sân')} {event.court_number}</div>}
                         </div>
                         {canEditEvent(event) && (
                           <div className="mt-4 flex gap-2">
@@ -648,7 +660,7 @@ export const EventsPage = () => {
                             >
                               <span className="inline-flex items-center gap-2">
                                 <Edit2 size={14} />
-                                Edit
+                                {tx('Edit', 'Sửa')}
                               </span>
                             </Button>
                             {canCancelEvent(event) && (
@@ -659,7 +671,7 @@ export const EventsPage = () => {
                               >
                                 <span className="inline-flex items-center gap-2">
                                   <XCircle size={14} />
-                                  Cancel
+                                  {tx('Cancel', 'Hủy')}
                                 </span>
                               </Button>
                             )}
@@ -671,7 +683,7 @@ export const EventsPage = () => {
                               >
                                 <span className="inline-flex items-center gap-2">
                                   <Trash2 size={14} />
-                                  Delete
+                                  {tx('Delete', 'Xóa')}
                                 </span>
                               </Button>
                             )}
@@ -698,8 +710,8 @@ export const EventsPage = () => {
                   >
                     <div className="flex items-center justify-between gap-3">
                       <div className="text-left">
-                        <h2 className="text-sm font-semibold text-neutral-700 uppercase">Completed Events</h2>
-                        <p className="text-xs text-neutral-500">{`${completedPastEvents.length} events saved`}</p>
+                        <h2 className="text-sm font-semibold text-neutral-700 uppercase">{tx('Completed Events', 'Sự kiện hoàn tất')}</h2>
+                        <p className="text-xs text-neutral-500">{tx(`${completedPastEvents.length} events saved`, `${completedPastEvents.length} sự kiện đã lưu`)}</p>
                       </div>
                       <span className="text-neutral-500">
                         {pastEventsExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
@@ -725,14 +737,14 @@ export const EventsPage = () => {
                           </div>
                           <Badge status={event.status === 'CANCELLED' ? 'error' : String(event.status || '').toUpperCase() === 'COMPLETED' ? 'success' : getBangkokDateKey(event.date) === todayKey ? 'success' : getBangkokDateKey(event.date) > todayKey ? 'warning' : 'success'}>
                             {event.status === 'CANCELLED'
-                              ? 'Cancelled'
+                              ? tx('Cancelled', 'Đã hủy')
                               : String(event.status || '').toUpperCase() === 'COMPLETED'
-                              ? 'Completed'
+                              ? tx('Completed', 'Hoàn tất')
                               : getBangkokDateKey(event.date) === todayKey
-                              ? 'Today'
+                              ? tx('Today', 'Hôm nay')
                               : getBangkokDateKey(event.date) > todayKey
-                              ? 'Upcoming'
-                              : 'Completed'}
+                              ? tx('Upcoming', 'Sắp tới')
+                              : tx('Completed', 'Hoàn tất')}
                           </Badge>
                         </div>
                       </div>
@@ -746,12 +758,12 @@ export const EventsPage = () => {
             {events.length === 0 && (
               <Card className="text-center py-12">
                 <Calendar size={48} className="mx-auto text-neutral-300 mb-4" />
-                <p className="text-neutral-600 mb-4">No events yet for this team</p>
+                <p className="text-neutral-600 mb-4">{tx('No events yet for this team', 'Team này chưa có sự kiện nào')}</p>
                 <Button
                   onClick={openCreateModal}
                   className="w-full"
                 >
-                  Create Event
+                  {tx('Create Event', 'Tạo sự kiện')}
                 </Button>
               </Card>
             )}
@@ -762,14 +774,14 @@ export const EventsPage = () => {
       <Modal
         isOpen={switchTeamModalOpen}
         onClose={() => setSwitchTeamModalOpen(false)}
-        title="Select Team"
+        title={tx('Select Team', 'Chọn team')}
         footer={
           <Button
             variant="secondary"
             onClick={() => setSwitchTeamModalOpen(false)}
             className="w-full"
           >
-            Close
+            {tx('Close', 'Đóng')}
           </Button>
         }
       >
@@ -787,14 +799,14 @@ export const EventsPage = () => {
             >
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="font-semibold">{team.teams?.name || 'Unnamed Team'}</p>
+                  <p className="font-semibold">{team.teams?.name || tx('Unnamed Team', 'Team chưa đặt tên')}</p>
                   <p className="text-xs text-neutral-600">
-                    Joined {team.joined_at ? new Date(team.joined_at).toLocaleDateString() : '-'}
+                    {tx('Joined', 'Tham gia')} {team.joined_at ? new Date(team.joined_at).toLocaleDateString() : '-'}
                   </p>
                 </div>
                 {currentTeam?.team_id === team.team_id && (
                   <span className="text-xs font-semibold uppercase text-primary-400">
-                    Current
+                    {tx('Current', 'Hiện tại')}
                   </span>
                 )}
               </div>
@@ -806,7 +818,7 @@ export const EventsPage = () => {
       <Modal
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
-        title={editingEvent ? 'Edit Event' : 'Create Event'}
+        title={editingEvent ? tx('Edit Event', 'Sửa sự kiện') : tx('Create Event', 'Tạo sự kiện')}
         footer={
           <>
             <Button
@@ -814,7 +826,7 @@ export const EventsPage = () => {
               onClick={() => setModalOpen(false)}
               className="flex-1"
             >
-              Cancel
+              {tx('Cancel', 'Hủy')}
             </Button>
             <Button
               onClick={handleSaveEvent}
@@ -822,34 +834,34 @@ export const EventsPage = () => {
               disabled={!formData.title || !formData.date || !currentTeam}
               loading={actionLoading}
             >
-              {editingEvent ? 'Save' : 'Create'}
+              {editingEvent ? tx('Save', 'Lưu') : tx('Create', 'Tạo')}
             </Button>
           </>
         }
       >
         <div className="space-y-4">
           <Input
-            label="Event Title"
+            label={tx('Event Title', 'Tên sự kiện')}
             value={formData.title}
             onChange={(e) => setFormData((prev) => ({ ...prev, title: e.target.value.slice(0, TEXT_INPUT_MAX_LENGTH) }))}
             maxLength={TEXT_INPUT_MAX_LENGTH}
-            placeholder="e.g., Morning Session"
+            placeholder={tx('e.g., Morning Session', 'ví dụ: Buổi sáng')}
           />
           <Input
-            label="Date & Time"
+            label={tx('Date & Time', 'Ngày & giờ')}
             type="datetime-local"
             value={formData.date}
             onChange={(e) => setFormData((prev) => ({ ...prev, date: e.target.value }))}
           />
           <Input
-            label="Location"
+            label={tx('Location', 'Địa điểm')}
             value={formData.location}
             onChange={(e) => setFormData((prev) => ({ ...prev, location: e.target.value.slice(0, TEXT_INPUT_MAX_LENGTH) }))}
             maxLength={TEXT_INPUT_MAX_LENGTH}
-            placeholder="Where will it be?"
+            placeholder={tx('Where will it be?', 'Diễn ra ở đâu?')}
           />
           <Input
-            label="Court Number"
+            label={tx('Court Number', 'Số sân')}
             type="number"
             value={formData.court_number}
             onChange={(e) => setFormData((prev) => ({
@@ -868,7 +880,7 @@ export const EventsPage = () => {
           setDeleteEventModalOpen(false)
           setEventToDelete(null)
         }}
-        title="Delete Event"
+        title={tx('Delete Event', 'Xóa sự kiện')}
         footer={
           <>
             <Button
@@ -879,7 +891,7 @@ export const EventsPage = () => {
               }}
               className="flex-1"
             >
-              Cancel
+              {tx('Cancel', 'Hủy')}
             </Button>
             <Button
               variant="danger"
@@ -888,13 +900,16 @@ export const EventsPage = () => {
               loading={actionLoading}
               disabled={!eventToDelete}
             >
-              Delete
+              {tx('Delete', 'Xóa')}
             </Button>
           </>
         }
       >
         <p className="text-sm text-neutral-600">
-          {`Are you sure you want to delete "${eventToDelete?.title || 'this event'}"? This action cannot be undone.`}
+          {tx(
+            `Are you sure you want to delete "${eventToDelete?.title || 'this event'}"? This action cannot be undone.`,
+            `Bạn có chắc muốn xóa "${eventToDelete?.title || 'sự kiện này'}"? Hành động này không thể hoàn tác.`
+          )}
         </p>
       </Modal>
 

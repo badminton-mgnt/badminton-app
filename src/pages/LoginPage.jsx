@@ -3,9 +3,12 @@ import { useNavigate } from 'react-router-dom'
 import { Input, Button, Card } from '../components'
 import { login } from '../lib/api'
 import { motion } from 'framer-motion'
+import { useLanguage } from '../contexts/LanguageContext'
 
 export const LoginPage = () => {
   const navigate = useNavigate()
+  const { language, setLanguage } = useLanguage()
+  const tx = (en, vi) => (language === 'vi' ? vi : en)
   const [formData, setFormData] = useState({
     identifier: '',
     password: '',
@@ -28,7 +31,7 @@ export const LoginPage = () => {
       navigate('/')
     } catch (err) {
       if (err.message.includes('Email not confirmed')) {
-        setError('Please verify your email before logging in')
+        setError(tx('Please verify your email before logging in', 'Vui lòng xác minh email trước khi đăng nhập'))
       } else {
         setError(err.message)
       }
@@ -46,22 +49,32 @@ export const LoginPage = () => {
     >
       <div className="container-mobile">
         <div className="mb-12 mt-16">
-          <h1 className="text-4xl font-bold text-primary-400 mb-2">Badminton</h1>
-          <p className="text-neutral-600">Welcome back</p>
+          <div className="mb-2 flex items-start justify-between gap-3">
+            <h1 className="text-4xl font-bold text-primary-400">Badminton</h1>
+            <select
+              value={language}
+              onChange={(event) => setLanguage(event.target.value)}
+              className="h-9 rounded-lg border border-neutral-300 bg-white px-2 text-xs font-semibold text-neutral-700 outline-none"
+            >
+              <option value="en">EN</option>
+              <option value="vi">VI</option>
+            </select>
+          </div>
+          <p className="text-neutral-600">{tx('Welcome back', 'Chào mừng bạn quay lại')}</p>
         </div>
 
         <Card className="mb-6">
           <form onSubmit={handleSubmit} className="space-y-4">
             <Input
-              label="Email or Username"
+              label={tx('Email or Username', 'Email hoặc tên người dùng')}
               name="identifier"
               value={formData.identifier}
               onChange={handleChange}
-              placeholder="you@example.com or your.username"
+              placeholder={tx('you@example.com or your.username', 'you@example.com hoặc your.username')}
             />
 
             <Input
-              label="Password"
+              label={tx('Password', 'Mật khẩu')}
               type="password"
               name="password"
               value={formData.password}
@@ -81,7 +94,7 @@ export const LoginPage = () => {
               loading={loading}
               className="w-full"
             >
-              Login
+              {tx('Login', 'Đăng nhập')}
             </Button>
           </form>
         </Card>
@@ -91,15 +104,15 @@ export const LoginPage = () => {
             onClick={() => navigate('/forgot-password')}
             className="text-primary-400 hover:underline block w-full"
           >
-            Forgot password?
+            {tx('Forgot password?', 'Quên mật khẩu?')}
           </button>
           <p className="text-neutral-600">
-            Don't have an account?{' '}
+            {tx("Don't have an account?", 'Chưa có tài khoản?')}{' '}
             <button
               onClick={() => navigate('/signup')}
               className="text-primary-400 font-semibold hover:underline"
             >
-              Sign up
+              {tx('Sign up', 'Đăng ký')}
             </button>
           </p>
         </div>

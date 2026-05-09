@@ -3,6 +3,7 @@ import { Home, Calendar, Trophy, Settings2, User, Bell } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
+import { useLanguage } from '../contexts/LanguageContext'
 import { getUnreadNotificationCount, getUserProfile } from '../lib/api'
 import { supabase } from '../lib/supabase'
 
@@ -10,6 +11,7 @@ export const BottomNav = () => {
   const location = useLocation()
   const navigate = useNavigate()
   const { user } = useAuth()
+  const { t } = useLanguage()
   const [isAdmin, setIsAdmin] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
   const [latestNotificationPopup, setLatestNotificationPopup] = useState(null)
@@ -38,15 +40,15 @@ export const BottomNav = () => {
       if (latestUnread) {
         setLatestNotificationPopup({
           id: latestUnread.id,
-          title: latestUnread.title || 'New notification',
-          message: latestUnread.message || 'You have a new update.',
+          title: latestUnread.title || t('notification.new_title'),
+          message: latestUnread.message || t('notification.new_message'),
           linkPath: latestUnread.link_path || '/notifications',
         })
       }
     } catch (error) {
       console.error('Error loading latest unread notification:', error)
     }
-  }, [user?.id, location.pathname])
+  }, [user?.id, location.pathname, t])
 
   const loadUnreadCount = useCallback(async () => {
     if (!user) {
@@ -145,8 +147,8 @@ export const BottomNav = () => {
             const nextItem = payload.new || {}
             setLatestNotificationPopup({
               id: nextItem.id || Date.now(),
-              title: nextItem.title || 'New notification',
-              message: nextItem.message || 'You have a new update.',
+              title: nextItem.title || t('notification.new_title'),
+              message: nextItem.message || t('notification.new_message'),
               linkPath: nextItem.link_path || '/notifications',
             })
           }
@@ -157,7 +159,7 @@ export const BottomNav = () => {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [user?.id, location.pathname, loadUnreadCount])
+  }, [user?.id, location.pathname, loadUnreadCount, t])
 
   useEffect(() => {
     if (!latestNotificationPopup) {
@@ -174,12 +176,12 @@ export const BottomNav = () => {
   }, [latestNotificationPopup])
 
   const items = [
-    { path: '/', label: 'Home', icon: Home },
-    { path: '/events', label: 'Events', icon: Calendar },
-    { path: '/scores', label: 'Scores', icon: Trophy },
-    ...(isAdmin ? [{ path: '/manage', label: 'Manage', icon: Settings2 }] : []),
-    { path: '/notifications', label: 'Alerts', icon: Bell, unreadCount },
-    { path: '/me', label: 'Me', icon: User },
+    { path: '/', label: t('nav.home'), icon: Home },
+    { path: '/events', label: t('nav.events'), icon: Calendar },
+    { path: '/scores', label: t('nav.scores'), icon: Trophy },
+    ...(isAdmin ? [{ path: '/manage', label: t('nav.manage'), icon: Settings2 }] : []),
+    { path: '/notifications', label: t('nav.alerts'), icon: Bell, unreadCount },
+    { path: '/me', label: t('nav.me'), icon: User },
   ]
 
   const handleTabClick = (path) => {
@@ -215,7 +217,7 @@ export const BottomNav = () => {
             })
           }}
         >
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-primary-500">New Notification</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-primary-500">{t('notification.new_title')}</p>
           <p className="mt-0.5 text-xs font-semibold text-neutral-900 line-clamp-1">{latestNotificationPopup.title}</p>
           <p className="mt-0.5 text-[11px] text-neutral-600 line-clamp-1">{latestNotificationPopup.message}</p>
         </button>

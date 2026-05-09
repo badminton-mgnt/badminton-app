@@ -31,6 +31,7 @@ import { isSettlementTransferFeatureGloballyEnabled } from '../lib/featureFlags'
 import { motion } from 'framer-motion'
 import { CheckCircle2, Clock3, QrCode } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
+import { useLanguage } from '../contexts/LanguageContext'
 
 const CHECKIN_PAYMENT_WINDOW_DAYS = 3
 const DAY_IN_MS = 24 * 60 * 60 * 1000
@@ -61,6 +62,8 @@ export const EventDetailPage = () => {
   const { eventId } = useParams()
   const navigate = useNavigate()
   const { user } = useAuth()
+  const { language } = useLanguage()
+  const tx = (en, vi) => (language === 'vi' ? vi : en)
   const [event, setEvent] = useState(null)
   const [participants, setParticipants] = useState([])
   const [isCurrentUserParticipant, setIsCurrentUserParticipant] = useState(false)
@@ -81,7 +84,7 @@ export const EventDetailPage = () => {
   const [loadError, setLoadError] = useState('')
   const [expenseForm, setExpenseForm] = useState({ amount: '', description: '', expenseForUserId: '' })
   const [receiverPaymentInfo, setReceiverPaymentInfo] = useState(null)
-  const [receiverName, setReceiverName] = useState('Treasurer')
+  const [receiverName, setReceiverName] = useState('')
   const [teamTreasurerId, setTeamTreasurerId] = useState(null)
   const [paymentModalMode, setPaymentModalMode] = useState('PAY_TREASURER')
   const [paymentTarget, setPaymentTarget] = useState(null)
@@ -251,19 +254,19 @@ export const EventDetailPage = () => {
         ])
 
         if (receiverProfileResult.status === 'fulfilled') {
-          setReceiverName(receiverProfileResult.value?.name || 'Treasurer')
+          setReceiverName(receiverProfileResult.value?.name || tx('Treasurer', 'Thủ quỹ'))
         } else {
-          setReceiverName('Treasurer')
+          setReceiverName(tx('Treasurer', 'Thủ quỹ'))
         }
 
         if (receiverPaymentInfoResult.status === 'fulfilled') {
           setReceiverPaymentInfo(receiverPaymentInfoResult.value)
         } else {
           setReceiverPaymentInfo(null)
-          setReceiverPaymentInfoError(receiverPaymentInfoResult.reason?.message || 'Unable to load treasurer payment info.')
+          setReceiverPaymentInfoError(receiverPaymentInfoResult.reason?.message || tx('Unable to load treasurer payment info.', 'Không thể tải thông tin thanh toán của thủ quỹ.'))
         }
       } else {
-        setReceiverName('Treasurer not set')
+        setReceiverName(tx('Treasurer not set', 'Chưa chỉ định thủ quỹ'))
         setReceiverPaymentInfo(null)
         setReceiverPaymentInfoError('')
       }
@@ -276,7 +279,7 @@ export const EventDetailPage = () => {
       })
     } catch (error) {
       console.error('Error loading event:', error)
-      setLoadError('Unable to load this event right now.')
+      setLoadError(tx('Unable to load this event right now.', 'Không thể tải sự kiện này lúc này.'))
     } finally {
       setLoading(false)
     }
@@ -305,19 +308,19 @@ export const EventDetailPage = () => {
         ])
 
         if (receiverProfileResult.status === 'fulfilled') {
-          setReceiverName(receiverProfileResult.value?.name || 'Treasurer')
+          setReceiverName(receiverProfileResult.value?.name || tx('Treasurer', 'Thủ quỹ'))
         }
 
         if (receiverPaymentInfoResult.status === 'fulfilled') {
           setReceiverPaymentInfo(receiverPaymentInfoResult.value)
         } else {
           setReceiverPaymentInfo(null)
-          setReceiverPaymentInfoError(receiverPaymentInfoResult.reason?.message || 'Unable to load treasurer payment info.')
+          setReceiverPaymentInfoError(receiverPaymentInfoResult.reason?.message || tx('Unable to load treasurer payment info.', 'Không thể tải thông tin thanh toán của thủ quỹ.'))
         }
       } catch (error) {
         console.error('Error loading treasurer payment info:', error)
         setReceiverPaymentInfo(null)
-        setReceiverPaymentInfoError(error.message || 'Unable to load treasurer payment info.')
+        setReceiverPaymentInfoError(error.message || tx('Unable to load treasurer payment info.', 'Không thể tải thông tin thanh toán của thủ quỹ.'))
       } finally {
         setLoadingReceiverInfo(false)
       }
@@ -377,7 +380,7 @@ export const EventDetailPage = () => {
     requiresCheckInForDetails &&
     (isToday || (isEventPast && isWithinCheckInWindow))
   const hasParticipantAccess = canBypassCheckInGate || isCurrentUserParticipant
-  const headerStatusLabel = isToday ? 'Today' : isUpcomingEvent ? 'Upcoming' : ''
+  const headerStatusLabel = isToday ? tx('Today', 'Hôm nay') : isUpcomingEvent ? tx('Upcoming', 'Sắp tới') : ''
   const headerStatusBadge = isToday ? 'success' : isUpcomingEvent ? 'warning' : 'default'
   const currentParticipant = participants.find((participant) => String(participant.user_id) === String(user.id))
   const isCheckedIn = isParticipantCheckedIn(currentParticipant) || hasCheckedInEvent(user.id, eventId)
@@ -393,7 +396,7 @@ export const EventDetailPage = () => {
     .filter((participant) => isParticipantCheckedIn(participant))
     .map((participant) => ({
       user_id: participant.user_id,
-      name: participant.users?.name || 'Member',
+      name: participant.users?.name || tx('Member', 'Thành viên'),
     }))
     .sort((a, b) => a.name.localeCompare(b.name))
   const canOpenExpenseModal = (isCheckedIn || isTeamTreasurer) && isJoiningClosed && !isExpenseAddingClosed
@@ -423,7 +426,7 @@ export const EventDetailPage = () => {
           checked_in: true,
           users: {
             id: user.id,
-            name: currentUserName || 'You',
+            name: currentUserName || tx('You', 'Bạn'),
           },
         }
         const existingIndex = prev.findIndex((item) => String(item.user_id) === String(user.id))
@@ -691,14 +694,14 @@ export const EventDetailPage = () => {
         animate={{ opacity: 1 }}
         className="pb-24"
       >
-        <Header title="Event Detail" subtitle="Unavailable" />
+        <Header title={tx('Event Detail', 'Chi tiết sự kiện')} subtitle={tx('Unavailable', 'Không khả dụng')} />
         <div className="container-mobile py-6">
           <Card className="space-y-4">
             <p className="text-sm text-neutral-600">
-              {loadError || 'Unable to load this event right now.'}
+              {loadError || tx('Unable to load this event right now.', 'Không thể tải sự kiện này lúc này.')}
             </p>
             <Button variant="secondary" onClick={() => navigate('/events')}>
-              Back to Events
+              {tx('Back to Events', 'Quay lại Sự kiện')}
             </Button>
           </Card>
         </div>
@@ -866,7 +869,7 @@ export const EventDetailPage = () => {
     ? participantSettlements
       .map(({ participant, settlement }) => ({
         user_id: participant.user_id,
-        name: participant.users?.name || 'Member',
+        name: participant.users?.name || tx('Member', 'Thành viên'),
         payoutNeeded: Math.max(settlement.normalizedBalance, 0),
         waitingTransfer: settlement.waitingIncomingPayoutTransfer,
       }))
@@ -937,12 +940,12 @@ export const EventDetailPage = () => {
 
   const userPaymentStatusLabel =
     userPaymentStatus === 'joining_open'
-      ? 'Joining Open'
+      ? tx('Joining Open', 'Đang mở tham gia')
       : userPaymentStatus === 'complete'
-      ? 'Complete'
+      ? tx('Complete', 'Hoàn tất')
       : userPaymentStatus === 'waiting_confirm'
-      ? 'Waiting Confirm'
-      : 'Pending'
+      ? tx('Waiting Confirm', 'Chờ xác nhận')
+      : tx('Pending', 'Đang chờ')
 
   const userPaymentStatusBadge =
     userPaymentStatus === 'joining_open'
@@ -955,12 +958,12 @@ export const EventDetailPage = () => {
 
   const paymentActionLabel =
     userPaymentStatus === 'joining_open'
-      ? 'Joining Open'
+      ? tx('Joining Open', 'Đang mở tham gia')
       : userPaymentStatus === 'complete'
-      ? 'View Transfer Info'
+      ? tx('View Transfer Info', 'Xem thông tin chuyển khoản')
       : userPaymentStatus === 'waiting_confirm'
-      ? 'Waiting Confirm'
-      : 'Transfer & Confirm'
+      ? tx('Waiting Confirm', 'Chờ xác nhận')
+      : tx('Transfer & Confirm', 'Chuyển khoản & xác nhận')
 
   const paymentStatusBadgeClassName =
     userPaymentStatus === 'joining_open'
@@ -971,27 +974,30 @@ export const EventDetailPage = () => {
 
   const paymentStatusHint =
     userPaymentStatus === 'joining_open'
-      ? 'Settlement is locked until admin/treasurer marks Joining Closed.'
+      ? tx('Settlement is locked until admin/treasurer marks Joining Closed.', 'Settlement sẽ khóa cho đến khi admin/thủ quỹ đóng tham gia.')
       : userPaymentStatus === 'waiting_confirm'
-      ? `Transferred đ ${formatVndAmount(Number(latestWaitingUserToTreasuryTransfer?.amount || waitingUserToTreasuryAmount || 0))} - waiting for treasurer confirmation`
+      ? tx(
+        `Transferred đ ${formatVndAmount(Number(latestWaitingUserToTreasuryTransfer?.amount || waitingUserToTreasuryAmount || 0))} - waiting for treasurer confirmation`,
+        `Đã chuyển đ ${formatVndAmount(Number(latestWaitingUserToTreasuryTransfer?.amount || waitingUserToTreasuryAmount || 0))} - đang chờ thủ quỹ xác nhận`
+      )
       : normalizedBalance < 0
-      ? 'You need to pay this amount.'
+      ? tx('You need to pay this amount.', 'Bạn cần thanh toán số tiền này.')
       : normalizedBalance > 0
-      ? 'The fund will reimburse this amount to you, so you do not need to transfer more.'
-      : 'No additional transfer is needed.'
+      ? tx('The fund will reimburse this amount to you, so you do not need to transfer more.', 'Quỹ sẽ hoàn lại số tiền này cho bạn, bạn không cần chuyển thêm.')
+      : tx('No additional transfer is needed.', 'Không cần chuyển thêm.')
 
   const transferConfirmationMethodLabel = (transfer) => {
     const method = String(transfer?.confirmation_method || '').toUpperCase()
-    if (method === 'AUTO_TIMEOUT') return 'Auto timeout'
-    if (method === 'TREASURER_MANUAL') return 'Treasurer manual'
-    return 'Receiver manual'
+    if (method === 'AUTO_TIMEOUT') return tx('Auto timeout', 'Tự động theo timeout')
+    if (method === 'TREASURER_MANUAL') return tx('Treasurer manual', 'Thủ quỹ xác nhận thủ công')
+    return tx('Receiver manual', 'Người nhận xác nhận thủ công')
   }
 
   const transferConfirmedByLabel = (transfer) => {
     if (String(transfer?.confirmation_method || '').toUpperCase() === 'AUTO_TIMEOUT') {
-      return transfer?.to_user?.name || transfer?.to_user?.email || 'Receiver (auto)'
+      return transfer?.to_user?.name || transfer?.to_user?.email || tx('Receiver (auto)', 'Người nhận (tự động)')
     }
-    return transfer?.confirmed_by_user?.name || transfer?.to_user?.name || 'Receiver'
+    return transfer?.confirmed_by_user?.name || transfer?.to_user?.name || tx('Receiver', 'Người nhận')
   }
 
   const waitingIncomingAutoConfirmHint = (() => {
@@ -1012,36 +1018,45 @@ export const EventDetailPage = () => {
     const remainingMinutes = Math.ceil(remainingMs / (60 * 1000))
 
     if (remainingMinutes <= 0) {
-      return 'Auto-confirm is processing.'
+      return tx('Auto-confirm is processing.', 'Đang xử lý tự động xác nhận.')
     }
 
-    return `Auto-confirm in about ${remainingMinutes} minute(s) if receiver does not confirm manually.`
+    return tx(
+      `Auto-confirm in about ${remainingMinutes} minute(s) if receiver does not confirm manually.`,
+      `Sẽ tự động xác nhận sau khoảng ${remainingMinutes} phút nếu người nhận không xác nhận thủ công.`
+    )
   })()
 
   const manualMarkedPaymentStatusNote = latestTreasurerManualToTreasuryTransfer
-    ? `Treasurer marked your payment as received${latestTreasurerManualToTreasuryTransfer.confirmed_at ? ` at ${formatBangkokDateTime(latestTreasurerManualToTreasuryTransfer.confirmed_at)}` : ''}.`
+    ? tx(
+      `Treasurer marked your payment as received${latestTreasurerManualToTreasuryTransfer.confirmed_at ? ` at ${formatBangkokDateTime(latestTreasurerManualToTreasuryTransfer.confirmed_at)}` : ''}.`,
+      `Thủ quỹ đã xác nhận đã nhận khoản thanh toán của bạn${latestTreasurerManualToTreasuryTransfer.confirmed_at ? ` lúc ${formatBangkokDateTime(latestTreasurerManualToTreasuryTransfer.confirmed_at)}` : ''}.`
+    )
     : ''
 
   const autoApprovedPaymentStatusNote = latestAutoApprovedIncomingPayoutTransfer
-    ? `System auto-approved this payout${latestAutoApprovedIncomingPayoutTransfer.confirmed_at ? ` at ${formatBangkokDateTime(latestAutoApprovedIncomingPayoutTransfer.confirmed_at)}` : ''} after timeout.`
+    ? tx(
+      `System auto-approved this payout${latestAutoApprovedIncomingPayoutTransfer.confirmed_at ? ` at ${formatBangkokDateTime(latestAutoApprovedIncomingPayoutTransfer.confirmed_at)}` : ''} after timeout.`,
+      `Hệ thống đã tự động xác nhận khoản chi này${latestAutoApprovedIncomingPayoutTransfer.confirmed_at ? ` lúc ${formatBangkokDateTime(latestAutoApprovedIncomingPayoutTransfer.confirmed_at)}` : ''} sau khi hết thời gian chờ.`
+    )
     : ''
 
   const settlementHelpContent = {
     totalExpense: {
-      title: 'Total Expense',
-      description: 'The total approved expense amount for this event. This value is split across checked-in participants to calculate each person\'s share.',
+      title: tx('Total Expense', 'Tổng chi phí'),
+      description: tx('The total approved expense amount for this event. This value is split across checked-in participants to calculate each person\'s share.', 'Tổng số tiền chi phí đã được duyệt cho sự kiện này. Giá trị này được chia cho các thành viên đã check-in để tính phần chia của mỗi người.'),
     },
     yourShare: {
-      title: 'Your Share',
-      description: 'Your share = Total Expense / number of checked-in participants. This is your expected contribution for the event.',
+      title: tx('Your Share', 'Phần của bạn'),
+      description: tx('Your share = Total Expense / number of checked-in participants. This is your expected contribution for the event.', 'Phần của bạn = Tổng chi phí / số người đã check-in. Đây là mức đóng góp dự kiến của bạn cho sự kiện.'),
     },
     yourExpenseTotal: {
-      title: 'Your Expense Total',
-      description: 'The total amount you personally paid and got approved as expenses in this event. It does not include settlement transfers.',
+      title: tx('Your Expense Total', 'Tổng chi phí của bạn'),
+      description: tx('The total amount you personally paid and got approved as expenses in this event. It does not include settlement transfers.', 'Tổng số tiền bạn đã thanh toán và được duyệt là chi phí trong sự kiện này. Không bao gồm các khoản chuyển trong settlement.'),
     },
     yourBalance: {
-      title: 'Your Balance',
-      description: 'Your remaining settlement balance after combining your share, approved expenses, transfers to treasury, and reimbursements from treasury. Negative means you still need to pay, positive means you should receive, and zero means fully settled.',
+      title: tx('Your Balance', 'Số dư của bạn'),
+      description: tx('Your remaining settlement balance after combining your share, approved expenses, transfers to treasury, and reimbursements from treasury. Negative means you still need to pay, positive means you should receive, and zero means fully settled.', 'Số dư settlement còn lại của bạn sau khi tổng hợp phần chia, chi phí đã duyệt, khoản chuyển vào quỹ và khoản hoàn từ quỹ. Âm là bạn còn phải trả, dương là bạn sẽ nhận thêm, bằng 0 là đã settle xong.'),
     },
   }
   const activeSettlementHelp = settlementHelpKey ? settlementHelpContent[settlementHelpKey] : null
@@ -1130,7 +1145,7 @@ export const EventDetailPage = () => {
       className="pb-24"
     >
       <Header
-        title={event?.title || 'Event Detail'}
+        title={event?.title || tx('Event Detail', 'Chi tiết sự kiện')}
         action={
           headerStatusLabel ? (
             <Badge status={headerStatusBadge}>
@@ -1140,9 +1155,9 @@ export const EventDetailPage = () => {
         }
         subtitleContent={(
           <div className="text-sm opacity-90 space-y-1">
-            <p>{`Team: ${event?.teams?.name || 'Unknown team'}`}</p>
+            <p>{`${tx('Team', 'Team')}: ${event?.teams?.name || tx('Unknown team', 'Team chưa xác định')}`}</p>
             <p>{formatBangkokDateTime(event?.date)}</p>
-            <p>{`Location: ${event?.court_number ? `Court ${event.court_number}` : 'Court not assigned'}`} - {`${event?.location || 'Location not set'}`}</p>
+            <p>{`${tx('Location', 'Địa điểm')}: ${event?.court_number ? `${tx('Court', 'Sân')} ${event.court_number}` : tx('Court not assigned', 'Chưa có số sân')}`} - {`${event?.location || tx('Location not set', 'Chưa có địa điểm')}`}</p>
           </div>
         )}
       />
@@ -1157,23 +1172,23 @@ export const EventDetailPage = () => {
               <div className="flex items-center justify-between gap-3">
                 <div>    
                   <p className="font-semibold">
-                    {isCheckedIn ? 'You are checked in for this event.' : 'Check in to include this event in settlement.'}
+                    {isCheckedIn ? tx('You are checked in for this event.', 'Bạn đã check-in cho sự kiện này.') : tx('Check in to include this event in settlement.', 'Hãy check-in để được tính vào settlement sự kiện này.')}
                   </p>
                   {isCheckedIn && checkedInAtLabel && (
                     <p className="text-xs text-neutral-600 mt-1">
                       {checkedInByName && !checkedInBySelf
-                        ? `Checked in at ${checkedInAtLabel} by ${checkedInByName}`
-                        : `Checked in at ${checkedInAtLabel}`}
+                        ? tx(`Checked in at ${checkedInAtLabel} by ${checkedInByName}`, `Check-in lúc ${checkedInAtLabel} bởi ${checkedInByName}`)
+                        : tx(`Checked in at ${checkedInAtLabel}`, `Check-in lúc ${checkedInAtLabel}`)}
                     </p>
                   )}
                 </div>
                 {isCheckedIn ? (
-                  <Badge status="success">Checked In</Badge>
+                  <Badge status="success">{tx('Checked In', 'Đã check-in')}</Badge>
                 ) : (
                   <Button onClick={handleCheckIn} loading={actionLoading}>
                     <span className="inline-flex items-center gap-2">
                       <CheckCircle2 size={16} />
-                      Check In
+                      {tx('Check In', 'Check-in')}
                     </span>
                   </Button>
                 )}
@@ -1186,22 +1201,22 @@ export const EventDetailPage = () => {
           <Card className="space-y-4">
             <p className="text-sm text-neutral-600">
               {isUpcomingEvent
-                ? 'This event has not started yet. Check-in is only available on event day.'
+                ? tx('This event has not started yet. Check-in is only available on event day.', 'Sự kiện này chưa bắt đầu. Chỉ có thể check-in vào ngày diễn ra sự kiện.')
                 : !hasParticipantAccess
                 ? isToday
                   ? isJoiningClosed
-                    ? 'Joining is locked for this event, so you can no longer join.'
-                    : 'You need to join this event before viewing event details.'
+                    ? tx('Joining is locked for this event, so you can no longer join.', 'Sự kiện này đã khóa tham gia, bạn không thể tham gia thêm.')
+                    : tx('You need to join this event before viewing event details.', 'Bạn cần tham gia sự kiện trước khi xem chi tiết.')
                   : isEventPast
-                  ? 'You cannot view event details because you did not join this event.'
-                  : 'You need to join this event before viewing event details.'
+                  ? tx('You cannot view event details because you did not join this event.', 'Bạn không thể xem chi tiết vì chưa tham gia sự kiện này.')
+                  : tx('You need to join this event before viewing event details.', 'Bạn cần tham gia sự kiện trước khi xem chi tiết.')
                 : isEventPast
-                ? 'You did not check in for this event, so you cannot view this event details page.'
-                : 'You need to check in before opening this event details page.'}
+                ? tx('You did not check in for this event, so you cannot view this event details page.', 'Bạn chưa check-in cho sự kiện này nên không thể xem trang chi tiết.')
+                : tx('You need to check in before opening this event details page.', 'Bạn cần check-in trước khi mở trang chi tiết sự kiện.')}
             </p>
             {hasParticipantAccess && !isUpcomingEvent && (
               <p className="text-sm text-neutral-600">
-                {`Your amount stays at đ ${formatVndAmount(0)} if you do not check in for this event.`}
+                {tx(`Your amount stays at đ ${formatVndAmount(0)} if you do not check in for this event.`, `Số tiền của bạn sẽ giữ ở mức đ ${formatVndAmount(0)} nếu bạn không check-in cho sự kiện này.`)}
               </p>
             )}
             <div className="space-y-3 pt-1">
@@ -1209,12 +1224,12 @@ export const EventDetailPage = () => {
                 <Button onClick={handleCheckIn} loading={actionLoading} className="w-full">
                   <span className="inline-flex items-center gap-2">
                     <CheckCircle2 size={16} />
-                    Check In
+                    {tx('Check In', 'Check-in')}
                   </span>
                 </Button>
               )}
               <Button variant="secondary" onClick={() => navigate('/events')} className="w-full">
-                Back to Events
+                {tx('Back to Events', 'Quay lại Sự kiện')}
               </Button>
             </div>
           </Card>
@@ -1222,7 +1237,7 @@ export const EventDetailPage = () => {
           <>
             <Card className="p-2 space-y-2">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500 px-2">
-                Sections
+                {tx('Sections', 'Danh mục')}
               </p>
               <div className={`grid gap-2 ${(canAutoApproveExpense || canManageTreasury) ? 'grid-cols-2 sm:grid-cols-5' : 'grid-cols-2 sm:grid-cols-4'}`}>
                 <button
@@ -1234,7 +1249,7 @@ export const EventDetailPage = () => {
                   }`}
                   onClick={() => handleSectionTabClick('settlement')}
                 >
-                  Settlement
+                  {tx('Settlement', 'Settlement')}
                 </button>
                 <button
                   type="button"
@@ -1245,7 +1260,7 @@ export const EventDetailPage = () => {
                   }`}
                   onClick={() => handleSectionTabClick('participants')}
                 >
-                  {`Participants`}
+                  {tx('Participants', 'Thành viên')}
                 </button>
                 <button
                   type="button"
@@ -1256,7 +1271,7 @@ export const EventDetailPage = () => {
                   }`}
                   onClick={() => handleSectionTabClick('expenses')}
                 >
-                  {`Expenses`}
+                  {tx('Expenses', 'Chi phí')}
                 </button>
                 <button
                   type="button"
@@ -1267,7 +1282,7 @@ export const EventDetailPage = () => {
                   }`}
                   onClick={() => handleSectionTabClick('scores')}
                 >
-                  Scores
+                  {tx('Scores', 'Điểm số')}
                 </button>
                 {(canAutoApproveExpense || canManageTreasury) && (
                   <button
@@ -1279,7 +1294,7 @@ export const EventDetailPage = () => {
                     }`}
                     onClick={() => handleSectionTabClick('treasury')}
                   >
-                    Treasury
+                    {tx('Treasury', 'Quỹ')}
                   </button>
                 )}
               </div>
@@ -1294,11 +1309,11 @@ export const EventDetailPage = () => {
                 <Card className="mb-3 bg-warning-50 border-warning-200">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                      <p className="text-xs text-neutral-600 uppercase">Joining Status</p>
+                      <p className="text-xs text-neutral-600 uppercase">{tx('Joining Status', 'Trạng thái tham gia')}</p>
                       <p className="text-sm font-semibold text-neutral-800">
                         {canCloseJoining
-                          ? 'Joining Open - mark Joining Closed after all players have joined.'
-                          : 'Joining Open - payment is calculated only after all admin/treasurer marks Joining Closed.'}
+                          ? tx('Joining Open - mark Joining Closed after all players have joined.', 'Đang mở tham gia - hãy đóng tham gia sau khi mọi người đã tham gia xong.')
+                          : tx('Joining Open - payment is calculated only after all admin/treasurer marks Joining Closed.', 'Đang mở tham gia - chỉ tính thanh toán sau khi admin/thủ quỹ đóng tham gia.')}
                       </p>
                     </div>
                     {canCloseJoining && (
@@ -1308,7 +1323,7 @@ export const EventDetailPage = () => {
                         disabled={joiningClosing || isSettlementCompleted}
                         className="w-full sm:w-auto shrink-0 whitespace-nowrap"
                       >
-                        Lock
+                        {tx('Lock', 'Khóa')}
                       </Button>
                     )}
                   </div>
@@ -1319,13 +1334,13 @@ export const EventDetailPage = () => {
                 <Card className="mb-3 bg-warning-50 border-warning-200">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                      <p className="text-xs text-neutral-600 uppercase">Expense Adding Status</p>
+                      <p className="text-xs text-neutral-600 uppercase">{tx('Expense Adding Status', 'Trạng thái thêm chi phí')}</p>
                       <p className="text-sm font-semibold text-neutral-800">
                         {canCloseExpenseAdding
-                          ? 'Expense adding is open. Lock it before settlement.'
+                          ? tx('Expense adding is open. Lock it before settlement.', 'Đang mở thêm chi phí. Hãy khóa trước khi settlement.')
                           : isTeamTreasurer
-                          ? 'Lock expenses before settlement.'
-                          : 'Expense adding is still open. You still have time to add expenses before treasurer locks settlement.'}
+                          ? tx('Lock expenses before settlement.', 'Hãy khóa chi phí trước khi settlement.')
+                          : tx('Expense adding is still open. You still have time to add expenses before treasurer locks settlement.', 'Việc thêm chi phí vẫn đang mở. Bạn vẫn còn thời gian thêm chi phí trước khi thủ quỹ khóa settlement.')}
                       </p>
                     </div>
                     {canCloseExpenseAdding && (
@@ -1335,7 +1350,7 @@ export const EventDetailPage = () => {
                         disabled={expenseClosing || isSettlementCompleted}
                         className="w-full sm:w-auto shrink-0 whitespace-nowrap"
                       >
-                        Lock Expenses
+                        {tx('Lock Expenses', 'Khóa chi phí')}
                       </Button>
                     )}
                   </div>
@@ -1344,22 +1359,22 @@ export const EventDetailPage = () => {
 
               {canRunSettlement && (
                 <p className="mb-3 text-xs text-neutral-600">
-                  Expense adding is closed. Settlement numbers are now locked for calculation.
+                  {tx('Expense adding is closed. Settlement numbers are now locked for calculation.', 'Đã khóa thêm chi phí. Số liệu settlement hiện đã khóa để tính toán.')}
                 </p>
               )}
 
               <h2 className="text-sm font-semibold text-neutral-600 mb-3 uppercase">
-                Settlement
+                {tx('Settlement', 'Settlement')}
               </h2>
               <div className="grid grid-cols-2 gap-3">
                 <Card>
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs text-neutral-600">Total Expense</p>
+                    <p className="text-xs text-neutral-600">{tx('Total Expense', 'Tổng chi phí')}</p>
                     <button
                       type="button"
                       className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-neutral-300 text-[11px] font-semibold text-neutral-600 hover:bg-neutral-100"
                       onClick={() => setSettlementHelpKey('totalExpense')}
-                      aria-label="Explain Total Expense"
+                      aria-label={tx('Explain Total Expense', 'Giải thích Tổng chi phí')}
                     >
                       ?
                     </button>
@@ -1368,12 +1383,12 @@ export const EventDetailPage = () => {
                 </Card>
                 <Card>
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs text-neutral-600">Your Share</p>
+                    <p className="text-xs text-neutral-600">{tx('Your Share', 'Phần của bạn')}</p>
                     <button
                       type="button"
                       className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-neutral-300 text-[11px] font-semibold text-neutral-600 hover:bg-neutral-100"
                       onClick={() => setSettlementHelpKey('yourShare')}
-                      aria-label="Explain Your Share"
+                      aria-label={tx('Explain Your Share', 'Giải thích Phần của bạn')}
                     >
                       ?
                     </button>
@@ -1385,12 +1400,12 @@ export const EventDetailPage = () => {
               <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <Card>
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs text-neutral-600">Your Expense Total</p>
+                    <p className="text-xs text-neutral-600">{tx('Your Expense Total', 'Tổng chi phí của bạn')}</p>
                     <button
                       type="button"
                       className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-neutral-300 text-[11px] font-semibold text-neutral-600 hover:bg-neutral-100"
                       onClick={() => setSettlementHelpKey('yourExpenseTotal')}
-                      aria-label="Explain Your Expense Total"
+                      aria-label={tx('Explain Your Expense Total', 'Giải thích Tổng chi phí của bạn')}
                     >
                       ?
                     </button>
@@ -1400,19 +1415,19 @@ export const EventDetailPage = () => {
                   </p>
                   {!isCurrentUserActiveInSettlement && !isUpcomingEvent && (
                     <p className="text-xs text-neutral-600 mt-3">
-                      {`You did not join this event, so your payment amount stays at đ ${formatVndAmount(0)}.`}
+                      {tx(`You did not join this event, so your payment amount stays at đ ${formatVndAmount(0)}.`, `Bạn không tham gia sự kiện này nên khoản thanh toán của bạn giữ ở mức đ ${formatVndAmount(0)}.`)}
                     </p>
                   )}
                 </Card>
 
                 <Card className={normalizedBalance < 0 ? 'bg-error-50' : 'bg-success-50'}>
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs text-neutral-600">Your Balance</p>
+                    <p className="text-xs text-neutral-600">{tx('Your Balance', 'Số dư của bạn')}</p>
                     <button
                       type="button"
                       className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-neutral-300 text-[11px] font-semibold text-neutral-600 hover:bg-white/70"
                       onClick={() => setSettlementHelpKey('yourBalance')}
-                      aria-label="Explain Your Balance"
+                      aria-label={tx('Explain Your Balance', 'Giải thích Số dư của bạn')}
                     >
                       ?
                     </button>
@@ -1424,32 +1439,32 @@ export const EventDetailPage = () => {
                   </p>
                   {isTeamTreasurer && normalizedBalance < 0 && (
                     <p className="mt-2 text-xs text-neutral-600">
-                      {`You need to contribute đ${formatVndAmount(Math.abs(normalizedBalance))} to the treasury.`}
+                      {tx(`You need to contribute đ${formatVndAmount(Math.abs(normalizedBalance))} to the treasury.`, `Bạn cần đóng góp đ${formatVndAmount(Math.abs(normalizedBalance))} vào quỹ.`)}
                     </p>
                   )}
                   {isTeamTreasurer && normalizedBalance > 0 && (
                     <p className="mt-2 text-xs text-neutral-600">
-                      {`Treasury needs to reimburse you đ${formatVndAmount(normalizedBalance)}.`}
+                      {tx(`Treasury needs to reimburse you đ${formatVndAmount(normalizedBalance)}.`, `Quỹ cần hoàn trả cho bạn đ${formatVndAmount(normalizedBalance)}.`)}
                     </p>
                   )}
                   {isTeamTreasurer && normalizedBalance === 0 && canRunSettlement && confirmedToTreasuryAmount > 0 && (
                     <p className="mt-2 text-xs text-neutral-600">
-                      {`Members paid đ${formatVndAmount(confirmedToTreasuryAmount)} to the treasury.`}
+                      {tx(`Members paid đ${formatVndAmount(confirmedToTreasuryAmount)} to the treasury.`, `Các thành viên đã chuyển đ${formatVndAmount(confirmedToTreasuryAmount)} vào quỹ.`)}
                     </p>
                   )}
                   {isTeamTreasurer && normalizedBalance === 0 && canRunSettlement && confirmedPayoutFromTreasuryAmount > 0 && (
                     <p className="mt-2 text-xs text-neutral-600">
-                      {`The treasury paid đ${formatVndAmount(confirmedPayoutFromTreasuryAmount)} to members.`}
+                      {tx(`The treasury paid đ${formatVndAmount(confirmedPayoutFromTreasuryAmount)} to members.`, `Quỹ đã chi trả đ${formatVndAmount(confirmedPayoutFromTreasuryAmount)} cho các thành viên.`)}
                     </p>
                   )}
                   {normalizedBalance === 0 && canRunSettlement && isCheckedIn && !isTeamTreasurer && confirmedUserToTreasuryAmount > 0 && (
                     <p className="mt-2 text-xs text-neutral-600">
-                      {`You paid đ${formatVndAmount(confirmedUserToTreasuryAmount)} to the treasurer.`}
+                      {tx(`You paid đ${formatVndAmount(confirmedUserToTreasuryAmount)} to the treasurer.`, `Bạn đã thanh toán đ${formatVndAmount(confirmedUserToTreasuryAmount)} cho thủ quỹ.`)}
                     </p>
                   )}
                   {normalizedBalance === 0 && canRunSettlement && isCheckedIn && !isTeamTreasurer && confirmedIncomingPayoutAmount > 0 && (
                     <p className="mt-2 text-xs text-neutral-600">
-                      {`The treasurer paid đ${formatVndAmount(confirmedIncomingPayoutAmount)} to you.`}
+                      {tx(`The treasurer paid đ${formatVndAmount(confirmedIncomingPayoutAmount)} to you.`, `Thủ quỹ đã chi trả đ${formatVndAmount(confirmedIncomingPayoutAmount)} cho bạn.`)}
                     </p>
                   )}
                 </Card>
@@ -1458,7 +1473,7 @@ export const EventDetailPage = () => {
               <Card className={`mt-3 ${normalizedBalance < 0 ? 'bg-error-50 border-error-200' : 'bg-success-50 border-success-200'}`}>
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <p className="text-xs text-neutral-600">Payment Status</p>
+                    <p className="text-xs text-neutral-600">{tx('Payment Status', 'Trạng thái thanh toán')}</p>
                     <Badge status={userPaymentStatusBadge} className={paymentStatusBadgeClassName}>{userPaymentStatusLabel}</Badge>
                     <p className={`mt-2 text-xs ${userPaymentStatus === 'waiting_confirm' ? 'text-warning-900' : 'text-neutral-600'}`}>
                       {paymentStatusHint}
@@ -1485,9 +1500,9 @@ export const EventDetailPage = () => {
 
               {waitingIncomingPayoutTransfer && (
                 <Card className="mt-3 space-y-2 bg-warning-50 border-warning-200">
-                  <p className="text-xs text-neutral-600 uppercase">Incoming Transfer Confirmation</p>
+                  <p className="text-xs text-neutral-600 uppercase">{tx('Incoming Transfer Confirmation', 'Xác nhận khoản nhận')}</p>
                   <p className="text-sm text-neutral-700">
-                    {`Treasury marked transfer: đ ${formatVndAmount(waitingIncomingPayoutTransfer.amount)}. Confirm when received.`}
+                    {tx(`Treasury marked transfer: đ ${formatVndAmount(waitingIncomingPayoutTransfer.amount)}. Confirm when received.`, `Quỹ đã đánh dấu khoản chuyển: đ ${formatVndAmount(waitingIncomingPayoutTransfer.amount)}. Hãy xác nhận khi đã nhận.`)}
                   </p>
                   {waitingIncomingAutoConfirmHint && (
                     <p className="text-xs text-neutral-600">{waitingIncomingAutoConfirmHint}</p>
@@ -1500,7 +1515,7 @@ export const EventDetailPage = () => {
                       loading={paymentActionId === `confirm-${waitingIncomingPayoutTransfer.id}`}
                       disabled={Boolean(paymentActionId)}
                     >
-                      Confirm Received
+                      {tx('Confirm Received', 'Xác nhận đã nhận')}
                     </Button>
                     <Button
                       onClick={() => handleMarkPaymentNotReceived(waitingIncomingPayoutTransfer.id)}
@@ -1509,13 +1524,13 @@ export const EventDetailPage = () => {
                       loading={paymentActionId === `reject-${waitingIncomingPayoutTransfer.id}`}
                       disabled={Boolean(paymentActionId)}
                     >
-                      Not Received Yet
+                      {tx('Not Received Yet', 'Chưa nhận được')}
                     </Button>
                   </div>
                 </Card>
               )}
               {normalizedBalance < 0 && isCheckedIn && !treasuryUserId && (
-                <p className="text-xs text-warning-900">This team does not have a treasurer yet. Ask admin/sub-admin to set one.</p>
+                <p className="text-xs text-warning-900">{tx('This team does not have a treasurer yet. Ask admin/sub-admin to set one.', 'Team này chưa có thủ quỹ. Hãy nhờ admin/sub_admin chỉ định.')}</p>
               )}
             </motion.div>
             )}
@@ -1526,25 +1541,25 @@ export const EventDetailPage = () => {
                 animate={{ opacity: 1, y: 0 }}
               >
               <h2 className="text-sm font-semibold text-neutral-600 mb-3 uppercase">
-                Treasury
+                {tx('Treasury', 'Quỹ')}
               </h2>
 
               <Card className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <p className="text-xs text-neutral-600 uppercase">Treasurer Info</p>
+                  <p className="text-xs text-neutral-600 uppercase">{tx('Treasurer Info', 'Thông tin thủ quỹ')}</p>
                   <Badge status="default">{receiverName}</Badge>
                 </div>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                   <div>
-                    <p className="text-xs text-neutral-600">Bank</p>
+                    <p className="text-xs text-neutral-600">{tx('Bank', 'Ngân hàng')}</p>
                     <p className="font-semibold">{receiverPaymentInfo?.bank_name || '-'}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-neutral-600">Account Name</p>
+                    <p className="text-xs text-neutral-600">{tx('Account Name', 'Tên tài khoản')}</p>
                     <p className="font-semibold">{receiverPaymentInfo?.account_name || receiverName}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-neutral-600">Account Number</p>
+                    <p className="text-xs text-neutral-600">{tx('Account Number', 'Số tài khoản')}</p>
                     <p className="font-mono text-sm font-semibold">{receiverPaymentInfo?.account_number || '-'}</p>
                   </div>
                 </div>
@@ -1552,13 +1567,13 @@ export const EventDetailPage = () => {
 
               <Card className="mt-3 space-y-3">
                 <div className="flex items-center justify-between">
-                  <p className="text-xs text-neutral-600 uppercase">Settlement Transfers</p>
+                  <p className="text-xs text-neutral-600 uppercase">{tx('Settlement Transfers', 'Chuyển khoản settlement')}</p>
                   <Badge status="default">{settlementTransferActionCount}</Badge>
                 </div>
                 <div className="space-y-2">
-                  <p className="text-xs font-semibold uppercase text-neutral-600">Need To Pay Treasury</p>
+                  <p className="text-xs font-semibold uppercase text-neutral-600">{tx('Need To Pay Treasury', 'Cần thanh toán vào quỹ')}</p>
                   {membersNeedingTreasuryCollection.length === 0 ? (
-                    <p className="text-xs text-neutral-500">No members need to pay into treasury.</p>
+                    <p className="text-xs text-neutral-500">{tx('No members need to pay into treasury.', 'Không có thành viên nào cần thanh toán vào quỹ.')}</p>
                   ) : (
                     membersNeedingTreasuryCollection.map((member) => {
                       const hasWaitingTransfer = Boolean(member.waitingTransfer)
@@ -1568,9 +1583,9 @@ export const EventDetailPage = () => {
                           <div className="flex items-center justify-between gap-2">
                             <div>
                               <p className="text-sm font-semibold">{member.name}</p>
-                              <p className="text-xs text-neutral-600">{`Expected payment: đ ${formatVndAmount(member.amountToTreasury)}`}</p>
+                              <p className="text-xs text-neutral-600">{tx(`Expected payment: đ ${formatVndAmount(member.amountToTreasury)}`, `Khoản cần thanh toán: đ ${formatVndAmount(member.amountToTreasury)}`)}</p>
                               {hasWaitingTransfer && (
-                                <p className="text-xs text-neutral-500">{`Submitted: đ ${formatVndAmount(Number(member.waitingTransfer?.amount || member.waitingAmount || 0))}`}</p>
+                                <p className="text-xs text-neutral-500">{tx(`Submitted: đ ${formatVndAmount(Number(member.waitingTransfer?.amount || member.waitingAmount || 0))}`, `Đã gửi: đ ${formatVndAmount(Number(member.waitingTransfer?.amount || member.waitingAmount || 0))}`)}</p>
                               )}
                             </div>
                             {hasWaitingTransfer ? (
@@ -1580,7 +1595,7 @@ export const EventDetailPage = () => {
                                 onClick={() => handleConfirmPaymentReceived(member.waitingTransfer)}
                                 disabled={paymentActionId === `confirm-${member.waitingTransfer.id}` || Boolean(paymentActionId)}
                               >
-                                {paymentActionId === `confirm-${member.waitingTransfer.id}` ? '...' : 'Confirm Received'}
+                                {paymentActionId === `confirm-${member.waitingTransfer.id}` ? '...' : tx('Confirm Received', 'Xác nhận đã nhận')}
                               </button>
                             ) : (isSettlementTransferEnabled && isTeamTreasurer ? (
                               <button
@@ -1589,10 +1604,10 @@ export const EventDetailPage = () => {
                                 onClick={() => handleTreasurerMarkReceivedDirectly(member)}
                                 disabled={paymentActionId === `force-${member.user_id}` || Boolean(paymentActionId)}
                               >
-                                {paymentActionId === `force-${member.user_id}` ? '...' : 'Mark Received'}
+                                {paymentActionId === `force-${member.user_id}` ? '...' : tx('Mark Received', 'Đánh dấu đã nhận')}
                               </button>
                             ) : (
-                              <Badge status="warning">Pending</Badge>
+                              <Badge status="warning">{tx('Pending', 'Đang chờ')}</Badge>
                             ))}
                           </div>
                         </div>
@@ -1602,9 +1617,9 @@ export const EventDetailPage = () => {
                 </div>
 
                 <div className="space-y-2 pt-1">
-                  <p className="text-xs font-semibold uppercase text-neutral-600">Need Reimbursement</p>
+                  <p className="text-xs font-semibold uppercase text-neutral-600">{tx('Need Reimbursement', 'Cần hoàn tiền')}</p>
                   {membersNeedingPayout.length === 0 ? (
-                    <p className="text-xs text-neutral-500">No members are waiting for reimbursement.</p>
+                    <p className="text-xs text-neutral-500">{tx('No members are waiting for reimbursement.', 'Không có thành viên nào đang chờ hoàn tiền.')}</p>
                   ) : (
                     membersNeedingPayout.map((member) => (
                       <button
@@ -1618,12 +1633,12 @@ export const EventDetailPage = () => {
                           <div>
                             <p className="text-sm font-semibold">
                               {member.name}
-                              {String(member.user_id) === String(treasuryUserId) ? ' (Treasurer)' : ''}
+                              {String(member.user_id) === String(treasuryUserId) ? tx(' (Treasurer)', ' (Thủ quỹ)') : ''}
                             </p>
-                            <p className="text-xs text-neutral-600">{`Expected payout: đ ${formatVndAmount(member.payoutNeeded)}`}</p>
+                            <p className="text-xs text-neutral-600">{tx(`Expected payout: đ ${formatVndAmount(member.payoutNeeded)}`, `Khoản cần hoàn: đ ${formatVndAmount(member.payoutNeeded)}`)}</p>
                           </div>
                           <Badge status={member.waitingTransfer ? 'warning' : 'default'}>
-                            {member.waitingTransfer ? 'Waiting Confirm' : 'Transfer'}
+                            {member.waitingTransfer ? tx('Waiting Confirm', 'Chờ xác nhận') : tx('Transfer', 'Chuyển khoản')}
                           </Badge>
                         </div>
                       </button>
@@ -1634,27 +1649,27 @@ export const EventDetailPage = () => {
 
               <Card className="mt-3 space-y-3">
                 <div className="flex items-center justify-between">
-                  <p className="text-xs text-neutral-600 uppercase">Treasury Ledger</p>
+                  <p className="text-xs text-neutral-600 uppercase">{tx('Treasury Ledger', 'Sổ quỹ')}</p>
                   <Badge status={normalizedTreasuryNetFund >= 0 ? 'success' : 'error'}>
-                    {normalizedTreasuryNetFund >= 0 ? 'Healthy' : 'Negative'}
+                    {normalizedTreasuryNetFund >= 0 ? tx('Healthy', 'Ổn định') : tx('Negative', 'Âm')}
                   </Badge>
                 </div>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                   <div>
-                    <p className="text-xs text-neutral-600">Treasury Received</p>
+                    <p className="text-xs text-neutral-600">{tx('Treasury Received', 'Quỹ nhận')}</p>
                     <p className="font-semibold text-success-700">{`đ ${formatVndAmount(treasuryReceivedAmount)}`}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-neutral-600">Treasury Sent</p>
+                    <p className="text-xs text-neutral-600">{tx('Treasury Sent', 'Quỹ chi')}</p>
                     <p className="font-semibold text-error-800">{`đ ${formatVndAmount(treasurySentAmount)}`}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-neutral-600">Treasury Expense</p>
+                    <p className="text-xs text-neutral-600">{tx('Treasury Expense', 'Chi phí quỹ')}</p>
                     <p className="font-semibold text-error-800">{`đ ${formatVndAmount(treasuryExpenseTotal)}`}</p>
                   </div>
                 </div>
                 <div className={`rounded-xl p-3 ${normalizedTreasuryNetFund >= 0 ? 'bg-success-50' : 'bg-error-50'}`}>
-                  <p className="text-xs text-neutral-600">Treasury Net Balance</p>
+                  <p className="text-xs text-neutral-600">{tx('Treasury Net Balance', 'Số dư ròng của quỹ')}</p>
                   <p className={`text-xl font-bold ${normalizedTreasuryNetFund >= 0 ? 'text-success-700' : 'text-error-800'}`}>
                     {normalizedTreasuryNetFund >= 0
                       ? `đ ${formatVndAmount(normalizedTreasuryNetFund)}`
@@ -1664,9 +1679,9 @@ export const EventDetailPage = () => {
                 {isTeamTreasurer && (
                   <div className="rounded-xl border border-neutral-200 p-3 space-y-2">
                     <div className="flex items-center justify-between">
-                      <p className="text-xs text-neutral-600">Settlement Status</p>
+                      <p className="text-xs text-neutral-600">{tx('Settlement Status', 'Trạng thái settlement')}</p>
                       <Badge status={isSettlementCompleted ? 'success' : isSettlementReadyToComplete ? 'warning' : 'default'}>
-                        {isSettlementCompleted ? 'Completed' : isSettlementReadyToComplete ? 'Ready' : 'In Progress'}
+                        {isSettlementCompleted ? tx('Completed', 'Hoàn tất') : isSettlementReadyToComplete ? tx('Ready', 'Sẵn sàng') : tx('In Progress', 'Đang xử lý')}
                       </Badge>
                     </div>
                     <Button
@@ -1675,7 +1690,7 @@ export const EventDetailPage = () => {
                       disabled={settlementCompleting || isSettlementCompleted || !isSettlementReadyToComplete}
                       className="w-full sm:w-auto"
                     >
-                      {isSettlementCompleted ? 'Settlement Completed' : 'Set Settlement Completed'}
+                      {isSettlementCompleted ? tx('Settlement Completed', 'Settlement đã hoàn tất') : tx('Set Settlement Completed', 'Đánh dấu hoàn tất settlement')}
                     </Button>
                   </div>
                 )}
@@ -1683,44 +1698,44 @@ export const EventDetailPage = () => {
 
               <Card className="mt-3 space-y-3">
                 <div className="flex items-center justify-between">
-                  <p className="text-xs text-neutral-600 uppercase">Confirmed Treasury Transfers</p>
-                  <Badge status="default">Audit</Badge>
+                  <p className="text-xs text-neutral-600 uppercase">{tx('Confirmed Treasury Transfers', 'Giao dịch quỹ đã xác nhận')}</p>
+                  <Badge status="default">{tx('Audit', 'Đối soát')}</Badge>
                 </div>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div className="space-y-2">
-                    <p className="text-xs font-semibold uppercase text-neutral-600">Treasury Received</p>
+                    <p className="text-xs font-semibold uppercase text-neutral-600">{tx('Treasury Received', 'Quỹ nhận')}</p>
                     {confirmedTreasuryReceivedTransfers.length === 0 ? (
-                      <p className="text-xs text-neutral-500">No confirmed received transfers yet.</p>
+                      <p className="text-xs text-neutral-500">{tx('No confirmed received transfers yet.', 'Chưa có giao dịch nhận nào được xác nhận.')}</p>
                     ) : (
                       confirmedTreasuryReceivedTransfers.map((transfer) => (
                         <div key={`recv-${transfer.id}`} className="rounded-lg border border-neutral-200 p-2">
-                          <p className="text-sm font-semibold">{transfer.from_user?.name || 'Unknown member'}</p>
-                          <p className="text-xs text-neutral-600">{`Received by: ${transfer.to_user?.name || receiverName || 'Treasury'}`}</p>
-                          <p className="text-xs text-neutral-600">{`Marked by: ${transferConfirmedByLabel(transfer)} (${transferConfirmationMethodLabel(transfer)})`}</p>
-                          <p className="text-xs text-neutral-600">{`Amount: đ ${formatVndAmount(transfer.amount)}`}</p>
-                          <p className="text-xs text-neutral-500">{`Received at: ${transfer.confirmed_at ? formatBangkokDateTime(transfer.confirmed_at) : '-'}`}</p>
+                          <p className="text-sm font-semibold">{transfer.from_user?.name || tx('Unknown member', 'Thành viên chưa rõ')}</p>
+                          <p className="text-xs text-neutral-600">{tx(`Received by: ${transfer.to_user?.name || receiverName || 'Treasury'}`, `Người nhận: ${transfer.to_user?.name || receiverName || 'Quỹ'}`)}</p>
+                          <p className="text-xs text-neutral-600">{tx(`Marked by: ${transferConfirmedByLabel(transfer)} (${transferConfirmationMethodLabel(transfer)})`, `Xác nhận bởi: ${transferConfirmedByLabel(transfer)} (${transferConfirmationMethodLabel(transfer)})`)}</p>
+                          <p className="text-xs text-neutral-600">{tx(`Amount: đ ${formatVndAmount(transfer.amount)}`, `Số tiền: đ ${formatVndAmount(transfer.amount)}`)}</p>
+                          <p className="text-xs text-neutral-500">{tx(`Received at: ${transfer.confirmed_at ? formatBangkokDateTime(transfer.confirmed_at) : '-'}`, `Nhận lúc: ${transfer.confirmed_at ? formatBangkokDateTime(transfer.confirmed_at) : '-'}`)}</p>
                         </div>
                       ))
                     )}
                   </div>
                   <div className="space-y-2">
-                    <p className="text-xs font-semibold uppercase text-neutral-600">Treasury Sent</p>
+                    <p className="text-xs font-semibold uppercase text-neutral-600">{tx('Treasury Sent', 'Quỹ chi')}</p>
                     {confirmedTreasurySentTransfers.length === 0 ? (
-                      <p className="text-xs text-neutral-500">No confirmed sent transfers yet.</p>
+                      <p className="text-xs text-neutral-500">{tx('No confirmed sent transfers yet.', 'Chưa có giao dịch chi nào được xác nhận.')}</p>
                     ) : (
                       confirmedTreasurySentTransfers.map((transfer) => (
                         <div key={`sent-${transfer.id}`} className="rounded-lg border border-neutral-200 p-2">
-                          <p className="text-sm font-semibold">{transfer.to_user?.name || 'Unknown member'}</p>
-                          <p className="text-xs text-neutral-600">{`Sent by: ${transfer.from_user?.name || receiverName || 'Treasury'}`}</p>
+                          <p className="text-sm font-semibold">{transfer.to_user?.name || tx('Unknown member', 'Thành viên chưa rõ')}</p>
+                          <p className="text-xs text-neutral-600">{tx(`Sent by: ${transfer.from_user?.name || receiverName || 'Treasury'}`, `Gửi bởi: ${transfer.from_user?.name || receiverName || 'Quỹ'}`)}</p>
                           {String(transfer?.confirmation_method || '').toUpperCase() === 'AUTO_TIMEOUT' ? (
-                            <p className="text-xs text-neutral-600">Auto-approved after timeout</p>
+                            <p className="text-xs text-neutral-600">{tx('Auto-approved after timeout', 'Tự động xác nhận sau timeout')}</p>
                           ) : (
-                            <p className="text-xs text-neutral-600">{`Confirmed by: ${transferConfirmedByLabel(transfer)} (${transferConfirmationMethodLabel(transfer)})`}</p>
+                            <p className="text-xs text-neutral-600">{tx(`Confirmed by: ${transferConfirmedByLabel(transfer)} (${transferConfirmationMethodLabel(transfer)})`, `Xác nhận bởi: ${transferConfirmedByLabel(transfer)} (${transferConfirmationMethodLabel(transfer)})`)}</p>
                           )}
-                          <p className="text-xs text-neutral-600">{`Sent to: ${transfer.to_user?.name || 'Unknown member'}`}</p>
-                          <p className="text-xs text-neutral-600">{`Amount: đ ${formatVndAmount(transfer.amount)}`}</p>
+                          <p className="text-xs text-neutral-600">{tx(`Sent to: ${transfer.to_user?.name || 'Unknown member'}`, `Gửi đến: ${transfer.to_user?.name || 'Thành viên chưa rõ'}`)}</p>
+                          <p className="text-xs text-neutral-600">{tx(`Amount: đ ${formatVndAmount(transfer.amount)}`, `Số tiền: đ ${formatVndAmount(transfer.amount)}`)}</p>
                           <p className="text-xs text-neutral-500">
-                            {`Sent at: ${transfer.confirmed_at ? formatBangkokDateTime(transfer.confirmed_at) : '-'}`}
+                            {tx(`Sent at: ${transfer.confirmed_at ? formatBangkokDateTime(transfer.confirmed_at) : '-'}`, `Gửi lúc: ${transfer.confirmed_at ? formatBangkokDateTime(transfer.confirmed_at) : '-'}`)}
                           </p>
                         </div>
                       ))
@@ -1739,10 +1754,10 @@ export const EventDetailPage = () => {
               >
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-sm font-semibold text-neutral-600 uppercase">
-                  Participants ({checkedInCount}/{teamMemberCount})
+                  {tx('Participants', 'Thành viên')} ({checkedInCount}/{teamMemberCount})
                 </h2>
                 <Badge status={isJoiningClosed ? 'success' : 'warning'}>
-                  {isJoiningClosed ? 'Joining Closed' : 'Joining Open'}
+                  {isJoiningClosed ? tx('Joining Closed', 'Đã đóng tham gia') : tx('Joining Open', 'Đang mở tham gia')}
                 </Badge>
                 {canManageParticipantCheckIn && (
                   <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
@@ -1758,7 +1773,7 @@ export const EventDetailPage = () => {
                     >
                       {addableTeamMembers.map((member) => (
                         <option key={member.user_id} value={member.user_id}>
-                          {member.users?.name || 'Unknown member'}
+                          {member.users?.name || tx('Unknown member', 'Thành viên chưa rõ')}
                         </option>
                       ))}
                     </select>
@@ -1769,20 +1784,20 @@ export const EventDetailPage = () => {
                       loading={participantActionLoading}
                     >
                       {selectedMembersToAdd.length > 0
-                        ? `Add Checked-In (${selectedMembersToAdd.length})`
-                        : 'Add Checked-In'}
+                        ? tx(`Add Checked-In (${selectedMembersToAdd.length})`, `Thêm đã check-in (${selectedMembersToAdd.length})`)
+                        : tx('Add Checked-In', 'Thêm đã check-in')}
                     </Button>
                   </div>
                 )}
               </div>
               {isJoiningClosed && (
                 <p className="mb-3 text-xs text-neutral-600">
-                  Joining is closed for this event. Participants cannot be added or removed.
+                  {tx('Joining is closed for this event. Participants cannot be added or removed.', 'Sự kiện này đã đóng tham gia. Không thể thêm hoặc xóa thành viên.')}
                 </p>
               )}
               <Card className="space-y-2">
                 {participants.length === 0 ? (
-                  <p className="text-sm text-neutral-600">No one has checked in yet.</p>
+                  <p className="text-sm text-neutral-600">{tx('No one has checked in yet.', 'Chưa có ai check-in.')}</p>
                 ) : (
                   participants.map((participant) => (
                     <div key={participant.id} className="flex items-center justify-between py-2 border-b last:border-b-0">
@@ -1791,14 +1806,14 @@ export const EventDetailPage = () => {
                         {participant.checked_in && participant.checked_in_at && (
                           <p className="text-xs text-neutral-600 mt-1">
                             {participant.checked_in_by_user?.name && String(participant.checked_in_by) !== String(participant.user_id)
-                              ? `Checked in at ${formatBangkokDateTime(participant.checked_in_at)} by ${participant.checked_in_by_user.name}`
-                              : `Checked in at ${formatBangkokDateTime(participant.checked_in_at)}`}
+                              ? tx(`Checked in at ${formatBangkokDateTime(participant.checked_in_at)} by ${participant.checked_in_by_user.name}`, `Check-in lúc ${formatBangkokDateTime(participant.checked_in_at)} bởi ${participant.checked_in_by_user.name}`)
+                              : tx(`Checked in at ${formatBangkokDateTime(participant.checked_in_at)}`, `Check-in lúc ${formatBangkokDateTime(participant.checked_in_at)}`)}
                           </p>
                         )}
                       </div>
                       <div className="flex items-center gap-2">
                         <Badge status={participant.checked_in ? 'success' : 'warning'}>
-                          {participant.checked_in ? 'Checked In' : 'Not Checked'}
+                          {participant.checked_in ? tx('Checked In', 'Đã check-in') : tx('Not Checked', 'Chưa check-in')}
                         </Badge>
                         {currentUserRole === 'admin' && participant.checked_in && (
                           <Button
@@ -1808,7 +1823,7 @@ export const EventDetailPage = () => {
                             loading={participantActionLoading}
                             disabled={isJoiningClosed || participantActionLoading}
                           >
-                            Remove
+                            {tx('Remove', 'Xóa')}
                           </Button>
                         )}
                       </div>
@@ -1825,14 +1840,14 @@ export const EventDetailPage = () => {
                 animate={{ opacity: 1, y: 0 }}
               >
                 <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-sm font-semibold text-neutral-600 uppercase">Scores</h2>
+                  <h2 className="text-sm font-semibold text-neutral-600 uppercase">{tx('Scores', 'Điểm số')}</h2>
                   <Badge status="default">{matchScores.length}</Badge>
                 </div>
 
                 {matchScores.length === 0 ? (
                   <Card className="text-center py-8">
                     <Clock3 size={28} className="mx-auto text-neutral-300 mb-2" />
-                    <p className="text-sm text-neutral-600">No matches saved for this event yet.</p>
+                    <p className="text-sm text-neutral-600">{tx('No matches saved for this event yet.', 'Chưa có trận nào được lưu cho sự kiện này.')}</p>
                   </Card>
                 ) : (
                   <div className="space-y-2">
@@ -1840,7 +1855,7 @@ export const EventDetailPage = () => {
                       <Card key={match.id} className="space-y-2">
                         <div className="flex items-start justify-between gap-2">
                           <div>
-                            <p className="text-xs text-neutral-600 uppercase">{match.match_type === 'DOUBLES' ? '2 vs 2' : '1 vs 1'}</p>
+                            <p className="text-xs text-neutral-600 uppercase">{match.match_type === 'DOUBLES' ? tx('2 vs 2', '2 đấu 2') : tx('1 vs 1', '1 đấu 1')}</p>
                             <p className="text-sm font-semibold text-neutral-800">
                               {getMatchTeamLabel(match.team_a_player_1_user?.name, match.team_a_player_2_user?.name, match.match_type)}
                               {'  '}
@@ -1851,13 +1866,13 @@ export const EventDetailPage = () => {
                               {getMatchTeamLabel(match.team_b_player_1_user?.name, match.team_b_player_2_user?.name, match.match_type)}
                             </p>
                           </div>
-                          <Badge status="warning">Saved</Badge>
+                          <Badge status="warning">{tx('Saved', 'Đã lưu')}</Badge>
                         </div>
 
                         <div className="text-xs text-neutral-600 space-y-1">
-                          <p>Start: {formatBangkokDateTime(match.started_at)}</p>
-                          <p>Duration: {formatMatchDuration(match.duration_seconds)}</p>
-                          <p>Saved by: {match.created_by_user?.name || 'Unknown'}</p>
+                          <p>{tx('Start', 'Bắt đầu')}: {formatBangkokDateTime(match.started_at)}</p>
+                          <p>{tx('Duration', 'Thời lượng')}: {formatMatchDuration(match.duration_seconds)}</p>
+                          <p>{tx('Saved by', 'Lưu bởi')}: {match.created_by_user?.name || tx('Unknown', 'Không rõ')}</p>
                         </div>
                       </Card>
                     ))}
@@ -1873,7 +1888,7 @@ export const EventDetailPage = () => {
               >
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-semibold text-neutral-600 uppercase">
-                  Expenses
+                  {tx('Expenses', 'Chi phí')}
                 </h2>
                 <Button
                   onClick={handleOpenExpenseModal}
@@ -1881,27 +1896,27 @@ export const EventDetailPage = () => {
                   className="px-3 py-1 text-xs"
                   disabled={!canOpenExpenseModal}
                 >
-                  Add
+                  {tx('Add', 'Thêm')}
                 </Button>
               </div>
               {!isJoiningClosed && (
                 <p className="text-xs text-neutral-600 mb-3">
-                  Waiting admin/treasurer to mark Joining Closed before adding expenses.
+                  {tx('Waiting admin/treasurer to mark Joining Closed before adding expenses.', 'Đang chờ admin/thủ quỹ đóng tham gia trước khi thêm chi phí.')}
                 </p>
               )}
               {isJoiningClosed && isExpenseAddingClosed && (
                 <p className="text-xs text-neutral-600 mb-3">
-                  Expense adding is closed for this event.
+                  {tx('Expense adding is closed for this event.', 'Sự kiện này đã khóa thêm chi phí.')}
                 </p>
               )}
               {!isCheckedIn && !isTeamTreasurer && (
                 <p className="text-xs text-neutral-600 mb-3">
-                  Check in first to add your expense to this event.
+                  {tx('Check in first to add your expense to this event.', 'Hãy check-in trước để thêm chi phí cho sự kiện này.')}
                 </p>
               )}
               {expenses.length === 0 ? (
                 <Card className="text-center py-8">
-                  <p className="text-neutral-600">No expenses yet</p>
+                  <p className="text-neutral-600">{tx('No expenses yet', 'Chưa có chi phí')}</p>
                 </Card>
               ) : (
                 <div className="space-y-2">
@@ -1909,9 +1924,9 @@ export const EventDetailPage = () => {
                     <Card key={expense.id} className="flex items-center justify-between">
                       <div>
                         <p className="text-sm font-semibold">{expense.description}</p>
-                        <p className="text-xs text-neutral-600">{expense.users?.name || 'Member'}</p>
+                        <p className="text-xs text-neutral-600">{expense.users?.name || tx('Member', 'Thành viên')}</p>
                         {expense.added_by && String(expense.added_by) !== String(expense.user_id) && (
-                          <p className="text-xs text-neutral-500">{`Added by ${expense.added_by_user?.name || 'Unknown'}`}</p>
+                          <p className="text-xs text-neutral-500">{tx(`Added by ${expense.added_by_user?.name || 'Unknown'}`, `Thêm bởi ${expense.added_by_user?.name || 'Không rõ'}`)}</p>
                         )}
                       </div>
                       <div className="text-right">
@@ -1930,8 +1945,8 @@ export const EventDetailPage = () => {
                         {expense.status !== 'PENDING' && (
                           <p className="mt-1 text-xs text-neutral-600">
                             {expense.status === 'APPROVED' && !expense.approved_by_user?.name && !expense.approved_at
-                              ? 'Auto-approved'
-                              : `by ${expense.approved_by_user?.name || 'Unknown'} at ${expense.approved_at ? formatBangkokDateTime(expense.approved_at) : '-'}`}
+                              ? tx('Auto-approved', 'Tự động duyệt')
+                              : tx(`by ${expense.approved_by_user?.name || 'Unknown'} at ${expense.approved_at ? formatBangkokDateTime(expense.approved_at) : '-'}`, `bởi ${expense.approved_by_user?.name || 'Không rõ'} lúc ${expense.approved_at ? formatBangkokDateTime(expense.approved_at) : '-'}`)}
                           </p>
                         )}
                         {canAutoApproveExpense && expense.status === 'PENDING' && (
@@ -1942,7 +1957,7 @@ export const EventDetailPage = () => {
                               onClick={() => handleExpenseStatusChange(expense.id, 'APPROVED')}
                               disabled={expenseActionId === expense.id}
                             >
-                              {expenseActionId === expense.id ? '...' : 'Approve'}
+                              {expenseActionId === expense.id ? '...' : tx('Approve', 'Duyệt')}
                             </button>
                             <button
                               type="button"
@@ -1950,7 +1965,7 @@ export const EventDetailPage = () => {
                               onClick={() => handleExpenseStatusChange(expense.id, 'REJECTED')}
                               disabled={expenseActionId === expense.id}
                             >
-                              Reject
+                              {tx('Reject', 'Từ chối')}
                             </button>
                           </div>
                         )}
@@ -1968,10 +1983,10 @@ export const EventDetailPage = () => {
       <Modal
         isOpen={Boolean(activeSettlementHelp)}
         onClose={() => setSettlementHelpKey(null)}
-        title={activeSettlementHelp?.title || 'Settlement Info'}
+        title={activeSettlementHelp?.title || tx('Settlement Info', 'Thông tin settlement')}
         footer={(
           <Button onClick={() => setSettlementHelpKey(null)} className="w-full">
-            Got it
+            {tx('Got it', 'Đã hiểu')}
           </Button>
         )}
       >
@@ -1983,7 +1998,7 @@ export const EventDetailPage = () => {
       <Modal
         isOpen={editModalOpen}
         onClose={() => setEditModalOpen(false)}
-        title="Edit Event"
+        title={tx('Edit Event', 'Sửa sự kiện')}
         footer={
           <>
             <Button
@@ -1991,7 +2006,7 @@ export const EventDetailPage = () => {
               onClick={() => setEditModalOpen(false)}
               className="flex-1"
             >
-              Cancel
+              {tx('Cancel', 'Hủy')}
             </Button>
             <Button
               onClick={handleSaveEvent}
@@ -1999,34 +2014,34 @@ export const EventDetailPage = () => {
               disabled={!eventForm.title || !eventForm.date}
               loading={actionLoading}
             >
-              Save
+              {tx('Save', 'Lưu')}
             </Button>
           </>
         }
       >
         <div className="space-y-4">
           <Input
-            label="Event Title"
+            label={tx('Event Title', 'Tên sự kiện')}
             value={eventForm.title}
             onChange={(e) => setEventForm((prev) => ({ ...prev, title: e.target.value.slice(0, TEXT_INPUT_MAX_LENGTH) }))}
             maxLength={TEXT_INPUT_MAX_LENGTH}
-            placeholder="e.g., Morning Session"
+            placeholder={tx('e.g., Morning Session', 'ví dụ: Buổi sáng')}
           />
           <Input
-            label="Date & Time"
+            label={tx('Date & Time', 'Ngày & giờ')}
             type="datetime-local"
             value={eventForm.date}
             onChange={(e) => setEventForm((prev) => ({ ...prev, date: e.target.value }))}
           />
           <Input
-            label="Location"
+            label={tx('Location', 'Địa điểm')}
             value={eventForm.location}
             onChange={(e) => setEventForm((prev) => ({ ...prev, location: e.target.value.slice(0, TEXT_INPUT_MAX_LENGTH) }))}
             maxLength={TEXT_INPUT_MAX_LENGTH}
-            placeholder="Where will it be?"
+            placeholder={tx('Where will it be?', 'Diễn ra ở đâu?')}
           />
           <Input
-            label="Court Number"
+            label={tx('Court Number', 'Số sân')}
             type="number"
             value={eventForm.court_number}
             onChange={(e) => setEventForm((prev) => ({
@@ -2042,7 +2057,7 @@ export const EventDetailPage = () => {
       <Modal
         isOpen={expenseModalOpen}
         onClose={() => setExpenseModalOpen(false)}
-        title="Add Expense"
+        title={tx('Add Expense', 'Thêm chi phí')}
         footer={
           <>
             <Button
@@ -2050,7 +2065,7 @@ export const EventDetailPage = () => {
               onClick={() => setExpenseModalOpen(false)}
               className="flex-1"
             >
-              Cancel
+              {tx('Cancel', 'Hủy')}
             </Button>
             <Button
               onClick={handleCreateExpense}
@@ -2058,7 +2073,7 @@ export const EventDetailPage = () => {
               disabled={!expenseForm.amount || !expenseForm.description || !canOpenExpenseModal || !isSelectedExpenseOwnerValid}
               loading={actionLoading}
             >
-              Add
+              {tx('Add', 'Thêm')}
             </Button>
           </>
         }
@@ -2066,7 +2081,7 @@ export const EventDetailPage = () => {
         <div className="space-y-4">
           {isTeamTreasurer && (
             <div>
-              <label className="block text-sm font-medium text-neutral-700 mb-2">Add For</label>
+              <label className="block text-sm font-medium text-neutral-700 mb-2">{tx('Add For', 'Thêm cho')}</label>
               <select
                 className="input-field"
                 value={expenseForm.expenseForUserId}
@@ -2075,7 +2090,7 @@ export const EventDetailPage = () => {
                   expenseForUserId: e.target.value,
                 }))}
               >
-                <option value="">Myself (default)</option>
+                <option value="">{tx('Myself (default)', 'Bản thân (mặc định)')}</option>
                 {checkedInParticipantOptions
                   .filter((participant) => String(participant.user_id) !== String(user.id))
                   .map((participant) => (
@@ -2084,21 +2099,21 @@ export const EventDetailPage = () => {
                   </option>
                   ))}
               </select>
-              <p className="mt-1 text-xs text-neutral-500">Leave empty to record your own expense.</p>
+              <p className="mt-1 text-xs text-neutral-500">{tx('Leave empty to record your own expense.', 'Để trống để ghi chi phí của chính bạn.')}</p>
             </div>
           )}
           <Input
-            label="Description"
+            label={tx('Description', 'Mô tả')}
             value={expenseForm.description}
             onChange={(e) => setExpenseForm((prev) => ({
               ...prev,
               description: e.target.value.slice(0, TEXT_INPUT_MAX_LENGTH),
             }))}
             maxLength={TEXT_INPUT_MAX_LENGTH}
-            placeholder="What is this for?"
+            placeholder={tx('What is this for?', 'Khoản này dùng cho gì?')}
           />
           <Input
-            label="Amount"
+            label={tx('Amount', 'Số tiền')}
             type="number"
             value={expenseForm.amount}
             onChange={(e) => setExpenseForm((prev) => ({
@@ -2114,7 +2129,7 @@ export const EventDetailPage = () => {
       <Modal
         isOpen={paymentModalOpen}
         onClose={() => setPaymentModalOpen(false)}
-        title={paymentModalMode === 'PAY_MEMBER' ? 'Transfer Reimbursement' : 'Transfer Payment'}
+        title={paymentModalMode === 'PAY_MEMBER' ? tx('Transfer Reimbursement', 'Chuyển khoản hoàn tiền') : tx('Transfer Payment', 'Chuyển khoản thanh toán')}
         footer={
           <>
             <Button
@@ -2122,7 +2137,7 @@ export const EventDetailPage = () => {
               onClick={() => setPaymentModalOpen(false)}
               className="flex-1"
             >
-              Cancel
+              {tx('Cancel', 'Hủy')}
             </Button>
             {((paymentModalMode === 'PAY_TREASURER' && userPaymentStatus === 'pending' && transferAmount > 0) ||
               (paymentModalMode === 'PAY_MEMBER' && payoutTransferAmount > 0)) && (
@@ -2132,7 +2147,7 @@ export const EventDetailPage = () => {
                 disabled={!isCheckedIn || !isJoiningClosed}
                 loading={actionLoading}
               >
-                I Have Transferred
+                {tx('I Have Transferred', 'Tôi đã chuyển khoản')}
               </Button>
             )}
           </>
@@ -2141,28 +2156,28 @@ export const EventDetailPage = () => {
         <div className="space-y-4 text-center">
           <p className="text-sm text-neutral-600">
             {paymentModalMode === 'PAY_MEMBER'
-              ? `Transfer to ${paymentTarget?.name || 'Member'}`
-              : `Transfer to ${receiverName}`}
+              ? tx(`Transfer to ${paymentTarget?.name || 'Member'}`, `Chuyển đến ${paymentTarget?.name || 'Thành viên'}`)
+              : tx(`Transfer to ${receiverName}`, `Chuyển đến ${receiverName}`)}
           </p>
           {paymentModalMode === 'PAY_TREASURER' && loadingReceiverInfo ? (
             <Card className="text-left">
-              <p className="text-xs text-neutral-600">Loading treasurer payment info...</p>
+              <p className="text-xs text-neutral-600">{tx('Loading treasurer payment info...', 'Đang tải thông tin thanh toán của thủ quỹ...')}</p>
             </Card>
           ) : (paymentModalMode === 'PAY_MEMBER' ? paymentTargetInfo : receiverPaymentInfo) ? (
             <Card className="space-y-3 text-left">
               <div>
-                <p className="text-xs text-neutral-600">Bank Name</p>
+                <p className="text-xs text-neutral-600">{tx('Bank Name', 'Tên ngân hàng')}</p>
                 <p className="font-semibold">{(paymentModalMode === 'PAY_MEMBER' ? paymentTargetInfo?.bank_name : receiverPaymentInfo?.bank_name) || '-'}</p>
               </div>
               <div>
-                <p className="text-xs text-neutral-600">Account Name</p>
+                <p className="text-xs text-neutral-600">{tx('Account Name', 'Tên tài khoản')}</p>
                 <p className="font-semibold">
                   {(paymentModalMode === 'PAY_MEMBER' ? paymentTargetInfo?.account_name : receiverPaymentInfo?.account_name)
                     || (paymentModalMode === 'PAY_MEMBER' ? paymentTarget?.name : receiverName)}
                 </p>
               </div>
               <div>
-                <p className="text-xs text-neutral-600">Account Number</p>
+                <p className="text-xs text-neutral-600">{tx('Account Number', 'Số tài khoản')}</p>
                 <p className="font-mono text-sm font-semibold">
                   {(paymentModalMode === 'PAY_MEMBER' ? paymentTargetInfo?.account_number : receiverPaymentInfo?.account_number) || '-'}
                 </p>
@@ -2172,8 +2187,8 @@ export const EventDetailPage = () => {
             <Card className="text-left">
               <p className="text-xs text-neutral-600">
                 {paymentModalMode === 'PAY_MEMBER'
-                  ? 'Member payment info has not been set yet.'
-                  : (receiverPaymentInfoError || 'Treasurer payment info has not been set yet.')}
+                  ? tx('Member payment info has not been set yet.', 'Thành viên chưa thiết lập thông tin thanh toán.')
+                  : (receiverPaymentInfoError || tx('Treasurer payment info has not been set yet.', 'Thủ quỹ chưa thiết lập thông tin thanh toán.'))}
               </p>
             </Card>
           )}
@@ -2182,7 +2197,7 @@ export const EventDetailPage = () => {
             {(paymentModalMode === 'PAY_MEMBER' ? paymentTargetInfo?.qr_url : receiverPaymentInfo?.qr_url) ? (
               <img
                 src={paymentModalMode === 'PAY_MEMBER' ? paymentTargetInfo?.qr_url : receiverPaymentInfo?.qr_url}
-                alt="Payment QR"
+                alt={tx('Payment QR', 'QR thanh toán')}
                 className="max-h-56 rounded-lg"
               />
             ) : (
@@ -2191,16 +2206,16 @@ export const EventDetailPage = () => {
           </div>
 
           <p className="text-sm text-neutral-600">
-            {`Amount to transfer: đ ${formatVndAmount(paymentModalMode === 'PAY_MEMBER' ? payoutTransferAmount : transferAmount)}`}
+            {tx(`Amount to transfer: đ ${formatVndAmount(paymentModalMode === 'PAY_MEMBER' ? payoutTransferAmount : transferAmount)}`, `Số tiền cần chuyển: đ ${formatVndAmount(paymentModalMode === 'PAY_MEMBER' ? payoutTransferAmount : transferAmount)}`)}
           </p>
           {paymentModalMode === 'PAY_TREASURER' && userPaymentStatus === 'waiting_confirm' && (
-            <p className="text-sm text-warning-900">Your transfer is waiting for treasurer confirmation.</p>
+            <p className="text-sm text-warning-900">{tx('Your transfer is waiting for treasurer confirmation.', 'Khoản chuyển của bạn đang chờ thủ quỹ xác nhận.')}</p>
           )}
           {paymentModalMode === 'PAY_TREASURER' && userPaymentStatus === 'complete' && (
-            <p className="text-sm text-success-700">Payment has been confirmed as received.</p>
+            <p className="text-sm text-success-700">{tx('Payment has been confirmed as received.', 'Khoản thanh toán đã được xác nhận đã nhận.')}</p>
           )}
           {paymentModalMode === 'PAY_MEMBER' && paymentTarget?.waitingTransfer && (
-            <p className="text-sm text-warning-900">This payout is already waiting for member confirmation.</p>
+            <p className="text-sm text-warning-900">{tx('This payout is already waiting for member confirmation.', 'Khoản hoàn này đang chờ thành viên xác nhận.')}</p>
           )}
         </div>
       </Modal>

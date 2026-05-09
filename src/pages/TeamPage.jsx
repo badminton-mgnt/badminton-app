@@ -6,6 +6,7 @@ import { isSettlementTransferFeatureGloballyEnabled } from '../lib/featureFlags'
 import { motion } from 'framer-motion'
 import { Edit2, UserPlus, Users } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
+import { useLanguage } from '../contexts/LanguageContext'
 import { useTeam } from '../contexts/TeamContext'
 import { formatBangkokDateTime } from '../lib/dateTime'
 
@@ -15,6 +16,8 @@ export const TeamPage = () => {
   const { teamId } = useParams()
   const navigate = useNavigate()
   const { user } = useAuth()
+  const { language } = useLanguage()
+  const tx = (en, vi) => (language === 'vi' ? vi : en)
   const { refreshTeams } = useTeam()
   const [team, setTeam] = useState(null)
   const [members, setMembers] = useState([])
@@ -65,7 +68,9 @@ export const TeamPage = () => {
   const canConfigureSettlementTransferFeature = currentUserRole === 'admin' && isSettlementTransferFeatureGloballyEnabled
   const hasTreasurer = Boolean(team?.treasurer_id)
   const treasurerMember = members.find((member) => String(member.user_id) === String(team?.treasurer_id))
-  const teamCreatedSubtitle = team?.created_at ? `Created at ${formatBangkokDateTime(team.created_at)}` : undefined
+  const teamCreatedSubtitle = team?.created_at
+    ? tx(`Created at ${formatBangkokDateTime(team.created_at)}`, `Tạo lúc ${formatBangkokDateTime(team.created_at)}`)
+    : undefined
 
   const handleAssignTreasurer = async (memberUserId) => {
     if (!canManageTreasurer || !team?.id) return
@@ -180,7 +185,7 @@ export const TeamPage = () => {
       animate={{ opacity: 1 }}
       className="pb-24"
     >
-      <Header title={team?.name || 'Team Members'} subtitle={teamCreatedSubtitle} />
+      <Header title={team?.name || tx('Team Members', 'Thành viên team')} subtitle={teamCreatedSubtitle} />
 
       <div className="container-mobile py-6 space-y-6">
         <motion.div
@@ -192,12 +197,12 @@ export const TeamPage = () => {
               <div className="flex items-center gap-2">
                 <Users size={24} className="text-primary-400" />
                 <div>
-                  <p className="text-sm text-neutral-600">Total Members</p>
+                  <p className="text-sm text-neutral-600">{tx('Total Members', 'Tổng thành viên')}</p>
                   <p className="text-2xl font-bold">{members.length}</p>
                 </div>
               </div>
               <Button onClick={() => setAddModalOpen(true)}>
-                Add User
+                {tx('Add User', 'Thêm người dùng')}
               </Button>
             </div>
           </Card>
@@ -206,13 +211,16 @@ export const TeamPage = () => {
             <Card className="mb-6">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm text-neutral-600">Admin Team Controls</p>
+                  <p className="text-sm text-neutral-600">{tx('Admin Team Controls', 'Điều khiển team (admin)')}</p>
                   <p className="font-semibold">{team?.name}</p>
                   {isSettlementTransferFeatureGloballyEnabled && (
                     <p className="mt-1 text-xs text-neutral-600">
                       {team?.settlement_transfer_feature_enabled
-                        ? `Settlement transfer feature: On (${team?.settlement_auto_confirm_minutes || 15} min timeout)`
-                        : 'Settlement transfer feature: Off'}
+                        ? tx(
+                          `Settlement transfer feature: On (${team?.settlement_auto_confirm_minutes || 15} min timeout)`,
+                          `Tính năng chuyển khoản settlement: Bật (timeout ${team?.settlement_auto_confirm_minutes || 15} phút)`
+                        )
+                        : tx('Settlement transfer feature: Off', 'Tính năng chuyển khoản settlement: Tắt')}
                     </p>
                   )}
                 </div>
@@ -227,7 +235,7 @@ export const TeamPage = () => {
                 >
                   <span className="inline-flex items-center gap-2">
                     <Edit2 size={16} />
-                    Edit
+                    {tx('Edit', 'Sửa')}
                   </span>
                 </Button>
               </div>
@@ -238,8 +246,8 @@ export const TeamPage = () => {
             <Card className="mb-6">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm text-neutral-600">Current Treasurer</p>
-                  <p className="font-semibold">{treasurerMember?.users?.name || 'Assigned member'}</p>
+                  <p className="text-sm text-neutral-600">{tx('Current Treasurer', 'Thủ quỹ hiện tại')}</p>
+                  <p className="font-semibold">{treasurerMember?.users?.name || tx('Assigned member', 'Thành viên đã chỉ định')}</p>
                 </div>
                 <Button
                   variant="secondary"
@@ -248,14 +256,14 @@ export const TeamPage = () => {
                   loading={assigningTreasurerId === 'UNSET'}
                   disabled={assigningTreasurerId !== null}
                 >
-                  Unset Treasurer
+                  {tx('Unset Treasurer', 'Gỡ thủ quỹ')}
                 </Button>
               </div>
             </Card>
           )}
 
           <h2 className="text-sm font-semibold text-neutral-600 mb-3 uppercase">
-            Members
+            {tx('Members', 'Thành viên')}
           </h2>
           <div className="space-y-2">
             {members.map((member) => (
@@ -268,15 +276,15 @@ export const TeamPage = () => {
                   <div className="flex-1">
                     <p className="font-semibold">
                       {member.users?.name}
-                      {member.user_id === user?.id ? ' (You)' : ''}
+                      {member.user_id === user?.id ? tx(' (You)', ' (Bạn)') : ''}
                     </p>
                     <p className="text-xs text-neutral-600">
-                      Joined {new Date(member.joined_at).toLocaleDateString()}
+                      {tx('Joined', 'Tham gia')} {new Date(member.joined_at).toLocaleDateString()}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
                     {String(team?.treasurer_id) === String(member.user_id) && (
-                      <Badge status="success">Treasurer</Badge>
+                      <Badge status="success">{tx('Treasurer', 'Thủ quỹ')}</Badge>
                     )}
                     {member.users?.role && member.users.role !== 'user' && (
                       <span className="text-xs font-medium uppercase text-primary-400">
@@ -291,7 +299,7 @@ export const TeamPage = () => {
                         loading={assigningTreasurerId === member.user_id}
                         onClick={() => handleAssignTreasurer(member.user_id)}
                       >
-                        Set Treasurer
+                        {tx('Set Treasurer', 'Đặt thủ quỹ')}
                       </Button>
                     )}
                   </div>
@@ -307,7 +315,7 @@ export const TeamPage = () => {
             onClick={() => navigate(-1)}
             className="w-full"
           >
-            Back
+            {tx('Back', 'Quay lại')}
           </Button>
           {isCurrentUserMember && (
             <Button
@@ -316,7 +324,7 @@ export const TeamPage = () => {
               className="w-full"
               loading={leavingTeam}
             >
-              Leave Team
+              {tx('Leave Team', 'Rời team')}
             </Button>
           )}
           {currentUserRole === 'admin' && (
@@ -328,7 +336,7 @@ export const TeamPage = () => {
               }}
               className="w-full"
             >
-              Delete Team
+              {tx('Delete Team', 'Xóa team')}
             </Button>
           )}
         </div>
@@ -342,7 +350,7 @@ export const TeamPage = () => {
           setSettlementTransferFeatureEnabled(Boolean(team?.settlement_transfer_feature_enabled))
           setSettlementAutoConfirmMinutes(String(team?.settlement_auto_confirm_minutes || 15))
         }}
-        title="Edit Team"
+        title={tx('Edit Team', 'Sửa team')}
         footer={
           <>
             <Button
@@ -355,7 +363,7 @@ export const TeamPage = () => {
               }}
               className="flex-1"
             >
-              Cancel
+              {tx('Cancel', 'Hủy')}
             </Button>
             <Button
               onClick={handleUpdateTeam}
@@ -372,26 +380,26 @@ export const TeamPage = () => {
                 )
               }
             >
-              Save
+              {tx('Save', 'Lưu')}
             </Button>
           </>
         }
       >
         <div className="space-y-4">
           <Input
-            label="Team Name"
+            label={tx('Team Name', 'Tên team')}
             value={teamName}
             onChange={(e) => setTeamName(e.target.value)}
-            placeholder="Enter team name"
+            placeholder={tx('Enter team name', 'Nhập tên team')}
             maxLength={20}
           />
           {isSettlementTransferFeatureGloballyEnabled ? (
             <div className="space-y-3 rounded-xl border border-neutral-200 bg-neutral-50 p-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold text-neutral-800">Settlement Transfer Feature</p>
+                  <p className="text-sm font-semibold text-neutral-800">{tx('Settlement Transfer Feature', 'Tính năng chuyển khoản settlement')}</p>
                   <p className="text-xs text-neutral-600">
-                    Allow treasurer override confirm + auto-receive timeout for payouts.
+                    {tx('Allow treasurer override confirm + auto-receive timeout for payouts.', 'Cho phép thủ quỹ xác nhận thủ công và tự nhận sau timeout cho khoản chi.')}
                   </p>
                 </div>
                 <button
@@ -399,11 +407,11 @@ export const TeamPage = () => {
                   className={`badge ${settlementTransferFeatureEnabled ? 'bg-success-50 text-success-700' : 'bg-neutral-200 text-neutral-700'}`}
                   onClick={() => setSettlementTransferFeatureEnabled((prev) => !prev)}
                 >
-                  {settlementTransferFeatureEnabled ? 'Enabled' : 'Disabled'}
+                  {settlementTransferFeatureEnabled ? tx('Enabled', 'Bật') : tx('Disabled', 'Tắt')}
                 </button>
               </div>
               <div>
-                <label className="block text-sm font-medium text-neutral-700 mb-2">Auto-confirm timeout (minutes)</label>
+                <label className="block text-sm font-medium text-neutral-700 mb-2">{tx('Auto-confirm timeout (minutes)', 'Timeout tự xác nhận (phút)')}</label>
                 <input
                   type="number"
                   min={1}
@@ -417,7 +425,7 @@ export const TeamPage = () => {
             </div>
           ) : (
             <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-xs text-neutral-600">
-              Settlement transfer feature is disabled globally by deployment env flag.
+              {tx('Settlement transfer feature is disabled globally by deployment env flag.', 'Tính năng chuyển khoản settlement đang bị tắt toàn cục bởi biến môi trường deploy.')}
             </div>
           )}
           <p className="text-xs text-neutral-600 text-right">
@@ -432,7 +440,7 @@ export const TeamPage = () => {
           setDeleteModalOpen(false)
           setDeleteReason('')
         }}
-        title="Delete Team"
+        title={tx('Delete Team', 'Xóa team')}
         footer={
           <>
             <Button
@@ -443,7 +451,7 @@ export const TeamPage = () => {
               }}
               className="flex-1"
             >
-              Cancel
+              {tx('Cancel', 'Hủy')}
             </Button>
             <Button
               variant="danger"
@@ -452,24 +460,24 @@ export const TeamPage = () => {
               loading={deletingTeam}
               disabled={!deleteReason.trim()}
             >
-              Delete
+              {tx('Delete', 'Xóa')}
             </Button>
           </>
         }
       >
         <div className="space-y-4">
           <p className="text-sm text-neutral-600">
-            Only admin users can delete a team. Please provide a clear reason before continuing.
+            {tx('Only admin users can delete a team. Please provide a clear reason before continuing.', 'Chỉ admin mới có thể xóa team. Vui lòng nhập lý do rõ ràng trước khi tiếp tục.')}
           </p>
           <div>
             <label className="block text-sm font-medium text-neutral-700 mb-2">
-              Delete reason
+              {tx('Delete reason', 'Lý do xóa')}
             </label>
             <textarea
               value={deleteReason}
               onChange={(e) => setDeleteReason(e.target.value.slice(0, TEXT_INPUT_MAX_LENGTH))}
               maxLength={TEXT_INPUT_MAX_LENGTH}
-              placeholder="Explain why this team is being deleted"
+              placeholder={tx('Explain why this team is being deleted', 'Giải thích lý do xóa team này')}
               className="input-field min-h-28 resize-none"
             />
           </div>
@@ -479,28 +487,28 @@ export const TeamPage = () => {
       <Modal
         isOpen={addModalOpen}
         onClose={() => setAddModalOpen(false)}
-        title="Add User To Team"
+        title={tx('Add User To Team', 'Thêm người dùng vào team')}
         footer={
           <Button
             variant="secondary"
             onClick={() => setAddModalOpen(false)}
             className="w-full"
           >
-            Close
+            {tx('Close', 'Đóng')}
           </Button>
         }
       >
         <div className="space-y-4">
           <Input
-            label="Search user"
+            label={tx('Search user', 'Tìm người dùng')}
             value={memberSearch}
             onChange={(e) => setMemberSearch(e.target.value)}
-            placeholder="Type a name"
+            placeholder={tx('Type a name', 'Nhập tên')}
           />
 
           {filteredUsers.length === 0 ? (
             <p className="text-sm text-neutral-600">
-              No available users found.
+              {tx('No available users found.', 'Không tìm thấy người dùng khả dụng.')}
             </p>
           ) : (
             <div className="space-y-3">
@@ -509,7 +517,7 @@ export const TeamPage = () => {
                   <div>
                     <p className="font-semibold">{appUser.name}</p>
                     <p className="text-xs text-neutral-600 uppercase">
-                      App role: {appUser.role}
+                      {tx('App role', 'Vai trò app')}: {appUser.role}
                     </p>
                   </div>
                   <Button
@@ -519,7 +527,7 @@ export const TeamPage = () => {
                   >
                     <span className="inline-flex items-center gap-2">
                       <UserPlus size={16} />
-                      Add
+                      {tx('Add', 'Thêm')}
                     </span>
                   </Button>
                 </Card>

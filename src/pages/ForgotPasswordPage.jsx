@@ -4,9 +4,12 @@ import { Input, Button, Card } from '../components'
 import { resetPassword } from '../lib/api'
 import { motion } from 'framer-motion'
 import { ArrowLeft } from 'lucide-react'
+import { useLanguage } from '../contexts/LanguageContext'
 
 export const ForgotPasswordPage = () => {
   const navigate = useNavigate()
+  const { language } = useLanguage()
+  const tx = (en, vi) => (language === 'vi' ? vi : en)
   const [email, setEmail] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -35,12 +38,12 @@ export const ForgotPasswordPage = () => {
           animate={{ opacity: 1, scale: 1 }}
           className="bg-white rounded-2xl p-8 max-w-md w-full text-center"
         >
-          <h2 className="text-2xl font-bold mb-2">Check your email</h2>
+          <h2 className="text-2xl font-bold mb-2">{tx('Check your email', 'Kiểm tra email của bạn')}</h2>
           <p className="text-neutral-600 mb-6">
-            We've sent a password reset link to <strong>{email}</strong>
+            {tx("We've sent a password reset link to", 'Chúng tôi đã gửi link đặt lại mật khẩu tới')} <strong>{email}</strong>
           </p>
           <Button onClick={() => navigate('/login')} className="w-full">
-            Back to Login
+            {tx('Back to Login', 'Quay lại đăng nhập')}
           </Button>
         </motion.div>
       </div>
@@ -59,18 +62,18 @@ export const ForgotPasswordPage = () => {
           className="flex items-center gap-2 text-primary-400 mb-8 hover:text-primary-600 transition"
         >
           <ArrowLeft size={20} />
-          Back to Login
+          {tx('Back to Login', 'Quay lại đăng nhập')}
         </button>
 
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-primary-400 mb-2">Reset Password</h1>
-          <p className="text-neutral-600">Enter your email to receive a reset link</p>
+          <h1 className="text-3xl font-bold text-primary-400 mb-2">{tx('Reset Password', 'Đặt lại mật khẩu')}</h1>
+          <p className="text-neutral-600">{tx('Enter your email to receive a reset link', 'Nhập email để nhận link đặt lại mật khẩu')}</p>
         </div>
 
         <Card className="mb-6">
           <form onSubmit={handleSubmit} className="space-y-4">
             <Input
-              label="Email"
+              label={tx('Email', 'Email')}
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -89,7 +92,7 @@ export const ForgotPasswordPage = () => {
               loading={loading}
               className="w-full"
             >
-              Send Reset Link
+              {tx('Send Reset Link', 'Gửi link đặt lại')}
             </Button>
           </form>
         </Card>
