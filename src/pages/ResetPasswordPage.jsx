@@ -95,6 +95,14 @@ export const ResetPasswordPage = () => {
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               placeholder="••••••••"
+              error={
+                password && !isPasswordValid
+                  ? tx(
+                    'Password must include uppercase, lowercase, number, special char, and 8+ characters.',
+                    'Mật khẩu phải có chữ hoa, chữ thường, số, ký tự đặc biệt và tối thiểu 8 ký tự.'
+                  )
+                  : ''
+              }
             />
             <Input
               label={tx('Confirm New Password', 'Xác nhận mật khẩu mới')}
@@ -114,7 +122,7 @@ export const ResetPasswordPage = () => {
             <Button
               type="submit"
               loading={loading}
-              disabled={!password || !confirmPassword || loading}
+              disabled={!password || !confirmPassword || !isPasswordValid || !isPasswordMatching || loading}
               className="w-full"
             >
               {tx('Update Password', 'Cập nhật mật khẩu')}
