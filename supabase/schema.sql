@@ -2207,6 +2207,7 @@ declare
   v_email text;
   v_username text;
   v_signup_method text;
+  v_is_internal_app_secret_email boolean;
 begin
   if v_identifier = '' then
     raise exception 'Identifier is required';
@@ -2240,7 +2241,9 @@ begin
     raise exception 'Account not found';
   end if;
 
-  if v_signup_method = 'app_secret' then
+  v_is_internal_app_secret_email := right(coalesce(v_email, ''), length('@app-secret.example.com')) = '@app-secret.example.com';
+
+  if v_signup_method = 'app_secret' or v_is_internal_app_secret_email then
     return jsonb_build_object(
       'mode', 'app_secret',
       'username', coalesce(v_username, v_identifier),
