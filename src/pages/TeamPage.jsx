@@ -26,6 +26,7 @@ export const TeamPage = () => {
   const [addModalOpen, setAddModalOpen] = useState(false)
   const [editModalOpen, setEditModalOpen] = useState(false)
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
+  const [leaveModalOpen, setLeaveModalOpen] = useState(false)
   const [memberSearch, setMemberSearch] = useState('')
   const [teamName, setTeamName] = useState('')
   const [settlementTransferFeatureEnabled, setSettlementTransferFeatureEnabled] = useState(false)
@@ -127,7 +128,9 @@ export const TeamPage = () => {
     try {
       setLeavingTeam(true)
       await leaveTeam(teamId, user.id)
-      navigate('/')
+      await refreshTeams()
+      setLeaveModalOpen(false)
+      navigate('/', { state: { navRefreshAt: Date.now() } })
     } catch (error) {
       console.error('Error leaving team:', error)
     } finally {
@@ -320,7 +323,7 @@ export const TeamPage = () => {
           {isCurrentUserMember && (
             <Button
               variant="danger"
-              onClick={handleLeaveTeam}
+              onClick={() => setLeaveModalOpen(true)}
               className="w-full"
               loading={leavingTeam}
             >
@@ -482,6 +485,44 @@ export const TeamPage = () => {
             />
           </div>
         </div>
+      </Modal>
+
+      <Modal
+        isOpen={leaveModalOpen}
+        onClose={() => {
+          if (!leavingTeam) {
+            setLeaveModalOpen(false)
+          }
+        }}
+        title={tx('Leave Team', 'Rời team')}
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => setLeaveModalOpen(false)}
+              className="flex-1"
+              disabled={leavingTeam}
+            >
+              {tx('Cancel', 'Hủy')}
+            </Button>
+            <Button
+              variant="danger"
+              onClick={handleLeaveTeam}
+              className="flex-1"
+              loading={leavingTeam}
+              disabled={leavingTeam}
+            >
+              {tx('Leave', 'Rời')}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-neutral-600">
+          {tx(
+            `Are you sure you want to leave ${team?.name || 'this team'}?`,
+            `Bạn có chắc muốn rời ${team?.name || 'team này'} không?`
+          )}
+        </p>
       </Modal>
 
       <Modal
