@@ -287,6 +287,46 @@ export const resetPassword = async (email) => {
   if (error) throw error
 }
 
+export const getPasswordResetMode = async (identifier) => {
+  const normalizedIdentifier = String(identifier || '').trim().toLowerCase()
+  if (!normalizedIdentifier) {
+    throw new Error('Identifier is required')
+  }
+
+  const { data, error } = await supabase.rpc('get_password_reset_mode', {
+    p_identifier: normalizedIdentifier,
+  })
+
+  if (error) throw error
+  return data
+}
+
+export const resetPasswordWithAppSecret = async ({ username, secretKey, newPassword }) => {
+  const normalizedUsername = String(username || '').trim().toLowerCase()
+  const trimmedSecretKey = String(secretKey || '').trim()
+  const nextPassword = String(newPassword || '')
+
+  if (!normalizedUsername) {
+    throw new Error('Username is required')
+  }
+
+  if (!trimmedSecretKey) {
+    throw new Error('Secret key is required')
+  }
+
+  if (!nextPassword) {
+    throw new Error('New password is required')
+  }
+
+  const { error } = await supabase.rpc('reset_password_with_app_secret', {
+    p_username: normalizedUsername,
+    p_secret_key: trimmedSecretKey,
+    p_new_password: nextPassword,
+  })
+
+  if (error) throw error
+}
+
 export const updatePassword = async (newPassword) => {
   const { error } = await supabase.auth.updateUser({
     password: newPassword,

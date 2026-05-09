@@ -2193,6 +2193,166 @@ alter table public.teams
 add constraint teams_settlement_auto_confirm_minutes_check
 check (settlement_auto_confirm_minutes between 1 and 1440);
 
+drop function if exists public.get_password_reset_mode(text);
+
+create or replace function public.get_password_reset_mode(p_identifier text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, auth, extensions
+as $$
+declare
+  v_identifier text := lower(trim(coalesce(p_identifier, '')));
+  v_user_id uuid;
+  v_email text;
+  v_username text;
+  v_signup_method text;
+begin
+  if v_identifier = '' then
+    raise exception 'Identifier is required';
+  end if;
+
+  if position('@' in v_identifier) > 0 then
+    select
+      au.id,
+      lower(coalesce(au.email, '')),
+      nullif(lower(trim(coalesce(pu.username, ''))), ''),
+      lower(trim(coalesce(au.raw_user_meta_data->>'signup_method', 'email')))
+    into v_user_id, v_email, v_username, v_signup_method
+    from auth.users au
+    left join public.users pu on pu.id = au.id
+    where lower(coalesce(au.email, '')) = v_identifier
+    limit 1;
+  else
+    select
+      au.id,
+      lower(coalesce(au.email, '')),
+      nullif(lower(trim(coalesce(pu.username, ''))), ''),
+      lower(trim(coalesce(au.raw_user_meta_data->>'signup_method', 'email')))
+    into v_user_id, v_email, v_username, v_signup_method
+    from public.users pu
+    join auth.users au on au.id = pu.id
+    where lower(coalesce(pu.username, '')) = v_identifier
+    limit 1;
+  end if;
+
+  if v_user_id is null then
+    raise exception 'Account not found';
+  end if;
+
+  if v_signup_method = 'app_secret' then
+    return jsonb_build_object(
+      'mode', 'app_secret',
+      'username', coalesce(v_username, v_identifier),
+      'email', null
+    );
+  end if;
+
+  return jsonb_build_object(
+    'mode', 'email',
+    'username', v_username,
+    'email', v_email
+  );
+end;
+$$;
+
+drop function if exists public.reset_password_with_app_secret(text, text, text);
+
+create or replace function public.reset_password_with_app_secret(
+  p_username text,
+  p_secret_key text,
+  p_new_password text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public, auth, extensions
+as $$
+declare
+  v_username text := lower(trim(coalesce(p_username, '')));
+  v_secret_key text := trim(coalesce(p_secret_key, ''));
+  v_new_password text := coalesce(p_new_password, '');
+  v_user_id uuid;
+  v_signup_method text;
+  v_secret_id uuid;
+begin
+  if v_username = '' then
+    raise exception 'Username is required';
+  end if;
+
+  if v_secret_key = '' then
+    raise exception 'Secret key is required';
+  end if;
+
+  if v_new_password !~ '^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$' then
+    raise exception 'Password must be at least 8 chars and include uppercase, lowercase, number, and special character';
+  end if;
+
+  select
+    au.id,
+    lower(trim(coalesce(au.raw_user_meta_data->>'signup_method', 'email')))
+  into v_user_id, v_signup_method
+  from public.users pu
+  join auth.users au on au.id = pu.id
+  where lower(coalesce(pu.username, '')) = v_username
+  limit 1;
+
+  if v_user_id is null then
+    raise exception 'Account not found';
+  end if;
+
+  if v_signup_method <> 'app_secret' then
+    raise exception 'This account uses email reset flow';
+  end if;
+
+  update public.app_signup_secrets s
+  set used_count = s.used_count + 1
+  where s.secret_key = v_secret_key
+    and s.is_active = true
+    and s.expires_at > now()
+    and s.used_count < s.max_uses
+  returning s.id into v_secret_id;
+
+  if v_secret_id is null then
+    if exists (
+      select 1
+      from public.app_signup_secrets s
+      where s.secret_key = v_secret_key
+        and s.is_active = true
+        and s.expires_at <= now()
+    ) then
+      raise exception 'App secret has expired';
+    end if;
+
+    if exists (
+      select 1
+      from public.app_signup_secrets s
+      where s.secret_key = v_secret_key
+        and s.is_active = true
+        and s.used_count >= s.max_uses
+    ) then
+      raise exception 'App secret usage limit reached';
+    end if;
+
+    raise exception 'Invalid app secret';
+  end if;
+
+  update auth.users
+  set
+    encrypted_password = crypt(v_new_password, gen_salt('bf')),
+    updated_at = now(),
+    email_confirmed_at = coalesce(email_confirmed_at, now())
+  where id = v_user_id;
+
+  if not found then
+    raise exception 'Unable to reset password';
+  end if;
+end;
+$$;
+
+grant execute on function public.get_password_reset_mode(text) to anon, authenticated;
+grant execute on function public.reset_password_with_app_secret(text, text, text) to anon, authenticated;
+
 -- Create Indexes for better performance
 CREATE INDEX idx_team_members_user_id ON team_members(user_id);
 CREATE INDEX idx_team_members_team_id ON team_members(team_id);
