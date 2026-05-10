@@ -8,6 +8,14 @@
   body {
     @apply font-inter bg-neutral-100;
   }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
+  html.dark body {
+    @apply bg-slate-900 text-slate-100;
+  }
   
   html {
     scroll-behavior: smooth;
@@ -51,7 +59,134 @@
     @apply w-full px-3 py-3 rounded-xl border border-neutral-200 focus:outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-400 focus:ring-opacity-20 transition-all text-sm;
   }
 
+  .language-select {
+    @apply h-9 rounded-lg border border-neutral-300 bg-white px-2 text-xs font-semibold text-neutral-700 outline-none;
+  }
+
   .container-mobile {
     @apply max-w-md mx-auto px-4 py-4;
   }
+}
+
+html.dark .btn-secondary {
+  @apply bg-slate-700 text-slate-100;
+}
+
+html.dark .card {
+  @apply bg-slate-800 border-slate-600 text-slate-100 shadow-none;
+}
+
+html.dark .input-field {
+  @apply bg-slate-800 border-slate-600 text-slate-100 placeholder-slate-300;
+}
+
+html.dark .language-select {
+  @apply bg-slate-800 border-slate-600 text-slate-100;
+  color-scheme: dark;
+}
+
+html.dark .language-select option {
+  background-color: #1e293b;
+  color: #f1f5f9;
+}
+
+html.dark select {
+  color-scheme: dark;
+}
+
+html.dark select option,
+html.dark select optgroup {
+  background-color: #1e293b;
+  color: #f1f5f9;
+}
+
+html.dark .bg-neutral-100 {
+  @apply bg-slate-900 !important;
+}
+
+html.dark .bg-white {
+  @apply bg-slate-800 !important;
+}
+
+html.dark .bg-neutral-50 {
+  @apply bg-slate-700 !important;
+}
+
+html.dark .bg-success-50 {
+  @apply bg-emerald-900 !important;
+}
+
+html.dark .bg-warning-50 {
+  @apply bg-amber-900 !important;
+}
+
+html.dark .bg-error-50 {
+  @apply bg-rose-900 !important;
+}
+
+html.dark .text-neutral-600 {
+  @apply text-slate-300 !important;
+}
+
+html.dark .text-neutral-500 {
+  @apply text-slate-400 !important;
+}
+
+html.dark .text-neutral-700 {
+  @apply text-slate-200 !important;
+}
+
+html.dark .text-neutral-800 {
+  @apply text-slate-100 !important;
+}
+
+html.dark .text-success-700 {
+  @apply text-emerald-200 !important;
+}
+
+html.dark .text-warning-900 {
+  @apply text-amber-200 !important;
+}
+
+html.dark .text-error-800 {
+  @apply text-rose-200 !important;
+}
+
+html.dark .border-neutral-200,
+html.dark .border-neutral-300 {
+  @apply border-slate-600 !important;
+}
+
+html.dark .hover\:bg-neutral-200:hover {
+  @apply bg-slate-700 !important;
+}
+
+html.dark .bg-primary-400 {
+  background-color: #388e3c !important;
+}
+
+html.dark .text-primary-400 {
+  @apply text-emerald-300 !important;
+}
+
+html.dark .border-primary-400 {
+  @apply border-emerald-500 !important;
+}
+
+html.dark .focus\:border-primary-400:focus {
+  @apply border-emerald-400 !important;
+}
+
+html.dark .focus\:ring-primary-400:focus {
+  @apply ring-emerald-400 !important;
+}
+
+html.dark .from-primary-400 {
+  --tw-gradient-from: #388e3c var(--tw-gradient-from-position) !important;
+  --tw-gradient-to: rgb(56 142 60 / 0) var(--tw-gradient-to-position) !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+
+html.dark .to-primary-400 {
+  --tw-gradient-to: #388e3c var(--tw-gradient-to-position) !important;
 }

@@ -8,6 +8,7 @@ import { motion } from 'framer-motion'
 import { LogOut, Edit2 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
+import { useTheme } from '../contexts/ThemeContext'
 
 const TEXT_INPUT_MAX_LENGTH = 100
 const NUMERIC_INPUT_MAX_LENGTH = 20
@@ -17,6 +18,7 @@ export const ProfilePage = () => {
   const location = useLocation()
   const { user } = useAuth()
   const { language, t } = useLanguage()
+  const { theme, setTheme } = useTheme()
   const tx = (en, vi) => (language === 'vi' ? vi : en)
   const [profile, setProfile] = useState(null)
   const [teams, setTeams] = useState([])
@@ -160,6 +162,31 @@ export const ProfilePage = () => {
                 <p className="text-lg font-semibold">{visibleEmail}</p>
               </div>
             ) : null}
+          </Card>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.05 }}
+        >
+          <Card>
+            <div className="space-y-3">
+              <p className="text-lg font-semibold">{tx('Appearance', 'Giao diện')}</p>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm font-medium text-neutral-700">{tx('Theme', 'Chủ đề')}</p>
+                <div className="w-full sm:w-52">
+                <select
+                  value={theme}
+                  onChange={(event) => setTheme(event.target.value)}
+                  className="input-field"
+                >
+                  <option value="light">{tx('Light Mode', 'Chế độ sáng')}</option>
+                  <option value="dark">{tx('Dark Mode', 'Chế độ tối')}</option>
+                </select>
+                </div>
+              </div>
+            </div>
           </Card>
         </motion.div>
 

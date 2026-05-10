@@ -254,7 +254,7 @@ export const SignupPage = () => {
             <select
               value={language}
               onChange={(event) => setLanguage(event.target.value)}
-              className="h-9 rounded-lg border border-neutral-300 bg-white px-2 text-xs font-semibold text-neutral-700 outline-none"
+              className="language-select"
             >
               <option value="en">EN</option>
               <option value="vi">VI</option>
