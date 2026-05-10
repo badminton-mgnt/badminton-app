@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { AuthProvider } from './contexts/AuthContext'
 import { LanguageProvider } from './contexts/LanguageContext'
 import { TeamProvider } from './contexts/TeamContext'
+import { ThemeProvider } from './contexts/ThemeContext'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import {
   SignupPage,
@@ -23,11 +24,12 @@ import './index.css'
 function App() {
   return (
     <Router basename={import.meta.env.BASE_URL}>
-      <LanguageProvider>
-        <AuthProvider>
-          <TeamProvider>
-            <div className="bg-neutral-100 min-h-screen font-inter">
-              <Routes>
+      <ThemeProvider>
+        <LanguageProvider>
+          <AuthProvider>
+            <TeamProvider>
+              <div className="bg-neutral-100 min-h-screen font-inter">
+                <Routes>
             {/* Public Routes */}
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
@@ -110,11 +112,12 @@ function App() {
 
             {/* Catch all */}
             <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
-            </div>
-          </TeamProvider>
-        </AuthProvider>
-      </LanguageProvider>
+                </Routes>
+              </div>
+            </TeamProvider>
+          </AuthProvider>
+        </LanguageProvider>
+      </ThemeProvider>
     </Router>
   )
 }
