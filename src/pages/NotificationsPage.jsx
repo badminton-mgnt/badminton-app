@@ -178,7 +178,7 @@ export const NotificationsPage = () => {
       <Card className={`transition hover:shadow-md ${notification.is_read ? 'opacity-80' : 'border border-primary-300 bg-primary-50/30'}`}>
         <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="font-semibold text-neutral-900">{notification.title}</p>
+            <p className="font-semibold text-neutral-900 dark:text-slate-100">{notification.title}</p>
             <p className="text-sm text-neutral-700 mt-1">{notification.message}</p>
             <p className="text-xs text-neutral-500 mt-2">{toRelativeTime(notification.created_at, language)}</p>
           </div>
