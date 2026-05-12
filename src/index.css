@@ -112,6 +112,10 @@ html.dark .bg-neutral-50 {
   @apply bg-slate-700 !important;
 }
 
+html.dark .bg-neutral-200 {
+  @apply bg-slate-700 !important;
+}
+
 html.dark .bg-success-50 {
   @apply bg-emerald-900 !important;
 }
@@ -167,6 +171,14 @@ html.dark .bg-primary-400 {
 
 html.dark .text-primary-400 {
   @apply text-emerald-300 !important;
+}
+
+html.dark .bg-primary-50 {
+  @apply bg-emerald-900 !important;
+}
+
+html.dark .text-primary-700 {
+  @apply text-emerald-200 !important;
 }
 
 html.dark .border-primary-400 {
